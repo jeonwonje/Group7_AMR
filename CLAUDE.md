@@ -1,0 +1,110 @@
+# CLAUDE.md — Group7_AMR
+
+Coding standards and repo conventions for AI assistants working in this repository.
+See also: [AGENT_GIT_GUIDE.md](AGENT_GIT_GUIDE.md)
+
+## Project Overview
+
+ROS 2 Humble colcon workspace for the CDE2310 Autonomous Mobile Robot.
+The robot explores an arena, detects AprilTag targets, and delivers a
+ping-pong ball via a spring-loaded launcher.
+
+## Folder Structure
+
+```
+Group7_AMR/                ← colcon workspace root
+├── src/
+│   ├── amr_navigation/    ← SLAM, frontier detection, exploration, coverage
+│   ├── amr_perception/    ← AprilTag detection, camera, docking
+│   ├── amr_launcher/      ← Servo actuation, ball delivery
+│   ├── amr_bringup/       ← Mission controller, launch files
+│   └── amr_utils/         ← Legacy lab exercise nodes
+├── hardware/
+│   ├── launcher/          ← SolidWorks CAD for launcher
+│   └── chassis/           ← TurtleBot3 mounting mods
+├── docs/
+│   ├── reports/           ← Milestone reports
+│   └── end_user_doc/      ← End-user documentation
+├── data/                  ← Recorded bags, maps
+├── CLAUDE.md              ← This file
+├── AGENT_GIT_GUIDE.md     ← Quick reference for AI agents
+├── CHANGELOG.md           ← Keep-a-changelog format
+├── README.md              ← Project overview
+└── requirements.txt       ← pip dependencies
+```
+
+## Build
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/Group7_AMR
+colcon build                              # full build
+colcon build --packages-select <pkg>      # incremental
+source install/setup.bash                 # overlay
+```
+
+## Branch Policy
+
+| Branch | Purpose |
+|---|---|
+| `main` | Protected. Merges via PR only. |
+| `dev/jeon` | Jeon Won Je — systems lead |
+| `dev/clara` | Clara — perception |
+| `dev/kumaresan` | Kumaresan — navigation |
+| `dev/shashwat` | Shashwat — launcher |
+| `dev/daniel` | Daniel — integration |
+
+**Never commit directly to main.** Always work on `dev/<name>`, then open a PR.
+
+## Commit Convention
+
+```
+<type>(<scope>): <short description>
+
+[optional body]
+
+ai-assisted: yes          ← required when AI helped write the code
+```
+
+### Types
+`feat` `fix` `docs` `test` `chore` `refactor`
+
+### Scopes
+`navigation` `perception` `launcher` `bringup` `utils` `chassis` `report` `conops`
+
+### Examples
+```
+feat(navigation): add frontier cost function
+fix(perception): handle missing camera frame
+docs(report): update milestone 2 figures
+chore(bringup): add slam launch file
+```
+
+## PR Process
+
+1. Ensure `colcon build` passes.
+2. Update `CHANGELOG.md` under `[Unreleased]`.
+3. Open PR targeting `main`, tag `@jeonwonje` as reviewer.
+4. PR description must summarize changes and link related issues.
+
+## AI Attribution
+
+When AI (Copilot, Claude, ChatGPT) generates or substantially modifies code:
+- Add `ai-assisted: yes` as a commit message footer.
+- Add a brief inline comment if a non-obvious algorithm was AI-generated.
+
+## CHANGELOG Format
+
+Use [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) under the
+`[Unreleased]` section. Categories: Added, Changed, Fixed, Removed.
+
+## Code Style
+
+- Python: follow PEP 8, enforced by `ament_flake8`.
+- ROS2 nodes: use `rclpy` with lifecycle patterns where appropriate.
+- Launch files: Python launch files in `amr_bringup/launch/`.
+- Config files: YAML in `amr_navigation/config/`.
+
+## Files Never to Commit
+
+`build/` `install/` `log/` `__pycache__/` `.env` `*.bag` `*.db3`

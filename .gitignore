@@ -1,0 +1,31 @@
+# Colcon workspace outputs
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SolidWorks auto-save
+~$*.sld*
+*.sldprt~
+
+# Sensitive
+.env
+
+# ROS bags
+*.bag
+*.db3
