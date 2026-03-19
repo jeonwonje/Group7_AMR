@@ -1,23 +1,21 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>amr_bringup</name>
-  <version>0.0.0</version>
-  <description>Mission orchestration and launch files</description>
+  <name>amr_nav</name>
+  <version>0.1.0</version>
+  <description>Custom navigation: Dijkstra target finding, A* wall penalty, cluster movement</description>
   <maintainer email="jeonwonje04@gmail.com">jeon-ros2-humble-gazebo-wsl</maintainer>
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
+  <depend>nav_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
-  <depend>nav2_msgs</depend>
-  <depend>tf2_ros</depend>
 
-  <exec_depend>amr_navigation</exec_depend>
   <exec_depend>amr_perception</exec_depend>
   <exec_depend>amr_launcher</exec_depend>
   <exec_depend>slam_toolbox</exec_depend>
-  <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>turtlebot3_gazebo</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
 
