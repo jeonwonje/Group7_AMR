@@ -9,6 +9,9 @@ from sensor_msgs.msg import LaserScan
 from apriltag_msgs.msg import AprilTagDetectionArray
 import numpy as np
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+import RPi.GPIO as GPIO
+import time
+import threading
 
 EXPLORE = 'explore'
 DOCK = 'dock'
@@ -20,6 +23,9 @@ LAUNCH_TAG_ID = 2
 DOCK_DISTANCE = 0.30
 DOCK_TOL = 0.02
 IMAGE_W = 800
+
+SERVO_PIN = 12
+DURATION = 0.909
 
 
 class MissionNode(Node):
@@ -51,6 +57,13 @@ class MissionNode(Node):
         self._dock_tag_size_px = None
         self._launch_triggered = False
 
+        # servo setup
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        GPIO.setup(SERVO_PIN, GPIO.OUT)
+        self._pwm = GPIO.PWM(SERVO_PIN, 50)
+        self._pwm.start(0)
+
         self.create_timer(0.1, self.run)
 
     def scan_callback(self, msg):
@@ -72,8 +85,14 @@ class MissionNode(Node):
             if det.id == LAUNCH_TAG_ID and self._state == DOCKED:
                 if not self._launch_triggered:
                     self._launch_triggered = True
-                    self.get_logger().info('Launch')
-                    print('Launch')
+                    threading.Thread(target=self.fire_servo, daemon=True).start()
+
+    def fire_servo(self):
+        self.get_logger().info(f'firing servo')
+        self._pwm.ChangeDutyCycle(5.0)
+        time.sleep(DURATION)
+        self._pwm.ChangeDutyCycle(0)
+        self.get_logger().info('servo done')
 
     def estimate_distance_from_tag(self):
         if self._dock_tag_size_px is None or self._dock_tag_size_px < 1:
@@ -199,12 +218,20 @@ class MissionNode(Node):
     def stop(self):
         self._cmd_pub.publish(Twist())
 
+    def destroy_node(self):
+        self._pwm.stop()
+        GPIO.cleanup()
+        super().destroy_node()
+
 
 def main():
     rclpy.init()
     node = MissionNode()
-    rclpy.spin(node)
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
