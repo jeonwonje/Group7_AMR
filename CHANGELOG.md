@@ -14,7 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Complete TurtleBot3 assembly model with all four layers, sub-assemblies, and reference parts (`hardware/chassis/assembly/`)
 - Custom launcher mechanical components — carousel ball feed, motor clamps, barrel guide, flywheel assembly (`hardware/launcher/components/`)
 - Launcher mount v2 with improved clearance (`hardware/chassis/mounts/`)
-- Spur gear for servo with integrated bearing — iteration on v1 design (`hardware/launcher/components/`) — plunger, tube, barrel-to-storage adapter, servo mount, spur gear (`hardware/launcher/v1/`)
+- Spur gear for servo with integrated bearing — iteration on v1 design (`hardware/launcher/components/`)
+- 3MF manufacturing files for 3D printing launcher and mount components (`hardware/launcher/3mf/`, `hardware/chassis/3mf/`) — plunger, tube, barrel-to-storage adapter, servo mount, spur gear (`hardware/launcher/v1/`)
 - `amr_nav` package: custom navigation replacing Nav2 stack
   - `pathfinding.py`: multi-source Dijkstra target finding, A* with wall
     penalty, cluster-to-cluster waypoint reduction
