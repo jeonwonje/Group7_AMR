@@ -14,11 +14,11 @@ ping-pong ball via a spring-loaded launcher.
 ```
 Group7_AMR/                ← colcon workspace root
 ├── src/
-│   ├── amr_navigation/    ← SLAM, frontier detection, exploration, coverage
+│   ├── amr_nav/           ← Custom navigation, exploration, mission control
 │   ├── amr_perception/    ← AprilTag detection, camera, docking
-│   ├── amr_launcher/      ← Servo actuation, ball delivery
-│   ├── amr_bringup/       ← Mission controller, launch files
-│   └── amr_utils/         ← Legacy lab exercise nodes
+│   └── amr_launcher/      ← Servo actuation, ball delivery
+├── archive/
+│   └── amr_utils/         ← Legacy lab exercise nodes (frozen, not built)
 ├── hardware/
 │   ├── launcher/          ← SolidWorks CAD for launcher
 │   └── chassis/           ← TurtleBot3 mounting mods
@@ -70,7 +70,7 @@ ai-assisted: yes          ← required when AI helped write the code
 `feat` `fix` `docs` `test` `chore` `refactor`
 
 ### Scopes
-`navigation` `perception` `launcher` `bringup` `utils` `chassis` `report` `conops`
+`nav` `perception` `launcher` `chassis` `report` `conops`
 
 ### Examples
 ```
@@ -102,8 +102,8 @@ Use [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) under the
 
 - Python: follow PEP 8, enforced by `ament_flake8`.
 - ROS2 nodes: use `rclpy` with lifecycle patterns where appropriate.
-- Launch files: Python launch files in `amr_bringup/launch/`.
-- Config files: YAML in `amr_navigation/config/`.
+- Launch files: Python launch files in `amr_nav/launch/`.
+- Config files: YAML in `amr_nav/config/`.
 
 ## Files Never to Commit
 
