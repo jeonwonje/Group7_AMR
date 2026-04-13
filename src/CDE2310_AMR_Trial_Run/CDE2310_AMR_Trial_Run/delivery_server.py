@@ -188,8 +188,14 @@ class DeliveryServer(Node):
         self.active_delivery_target = None
 
     def destroy_node(self):
+        # Reset launcher: retract plunger fully on shutdown
+        self.get_logger().info('Shutdown: retracting plunger...')
+        self.pwm.ChangeDutyCycle(CW_DUTY)
+        time.sleep(TIME_PER_REV * 2)
+        self.pwm.ChangeDutyCycle(0)
         self.pwm.stop()
         GPIO.cleanup()
+        self.get_logger().info('Launcher reset. GPIO cleaned up.')
         super().destroy_node()
 
 
