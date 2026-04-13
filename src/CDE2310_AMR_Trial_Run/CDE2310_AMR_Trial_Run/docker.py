@@ -75,7 +75,7 @@ class DockingServer(Node):
 
         # --- ROBUSTNESS PARAMETERS ---
         self.fallback_staging_offset = 0.15
-        self.max_docking_time = 180.0        
+        self.max_docking_time = 240.0        
         self.sensor_drop_tolerance = 1.0    
         
         # --- REFINEMENT PARAMETERS ---
@@ -173,6 +173,7 @@ class DockingServer(Node):
 
     def abort_docking_sequence(self, send_status=True):
         self.state = 'IDLE'
+        self.docking_start_time = None
         self.cmd_vel_pub.publish(Twist())
         if send_status:
             self.send_status('DOCKING_FAILED', self.target_tag)
@@ -476,6 +477,7 @@ class DockingServer(Node):
                 self.get_logger().info("DOCKING SEQUENCE COMPLETE.")
                 self.cmd_vel_pub.publish(Twist())
                 self.send_status('DOCKING_COMPLETE', self.target_tag)
+                self.docking_start_time = None
                 self.state = 'IDLE'
             else:
                 cmd.linear.x = self.slow_linear_speed
