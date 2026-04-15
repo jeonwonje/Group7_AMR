@@ -154,12 +154,12 @@ local_costmap:
       width: 3             # [TUNE] Local map width (m); increase to 4-5 for larger spaces
       height: 3            # [TUNE] Local map height (m)
       resolution: 0.05
-      robot_radius: 0.12   # [TUNE] Burger base is ~0.105m; add small safety margin
+      robot_radius: 0.13   # [TUNE] Actual robot radius
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 4.0  # [TUNE] Higher = steeper cost dropoff from obstacles (robot hugs center more)
-        inflation_radius: 0.18 # [TUNE] Keep > robot_radius; increase to keep further from walls
+        cost_scaling_factor: 15.0  # [TUNE] Higher = steeper cost dropoff from obstacles (robot hugs center more)
+        inflation_radius: 0.17 # [TUNE] Must be < half of narrowest gap (0.19m)
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -193,7 +193,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
-      robot_radius: 0.12   # [TUNE] Must match local_costmap robot_radius
+      robot_radius: 0.13   # [TUNE] Must match local_costmap robot_radius
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
@@ -216,8 +216,8 @@ global_costmap:
         map_subscribe_transient_local: True
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 4.0  # [TUNE] Higher = steeper cost dropoff from obstacles (robot hugs center more)
-        inflation_radius: 0.18 # [TUNE] Keep > robot_radius; increase to keep further from walls
+        cost_scaling_factor: 15.0  # [TUNE] Higher = steeper cost dropoff from obstacles (robot hugs center more)
+        inflation_radius: 0.17 # [TUNE] Must be < half of narrowest gap (0.19m)
       always_send_full_costmap: True
 
 map_server:
