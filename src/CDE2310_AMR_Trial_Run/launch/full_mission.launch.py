@@ -16,7 +16,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -30,8 +31,8 @@ from launch_ros.actions import Node
 #   Localhost-only (cyclonedds_local.xml): planner, behavior, bt_nav,
 #                                          lifecycle mgr, rviz, explore
 # ---------------------------------------------------------------------------
-DDS_CROSS = {'CYCLONEDDS_URI': 'file:///home/jeon-ros2-humble-gazebo-wsl/cyclonedds.xml'}
-DDS_LOCAL = {'CYCLONEDDS_URI': 'file:///home/jeon-ros2-humble-gazebo-wsl/cyclonedds_local.xml'}
+DDS_CROSS = {'CYCLONEDDS_URI': 'file:///home/kuga/cyclonedds.xml'}
+DDS_LOCAL = {'CYCLONEDDS_URI': 'file:///home/kuga/cyclonedds.xml'}
 
 
 def generate_launch_description():
@@ -49,11 +50,17 @@ def generate_launch_description():
     # Launch arguments
     # ------------------------------------------------------------------
     use_sim_time = LaunchConfiguration('use_sim_time')
+    enable_ekf = LaunchConfiguration('enable_ekf')
 
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time',
         default_value='false',
         description='Use simulation (Gazebo) clock if true')
+
+    declare_enable_ekf = DeclareLaunchArgument(
+        'enable_ekf',
+        default_value='false',
+        description='Launch robot_localization EKF odom/IMU fusion')
 
     sim_time_param = {'use_sim_time': use_sim_time}
 
@@ -65,6 +72,7 @@ def generate_launch_description():
         executable='ekf_node',
         name='ekf_filter_node',
         output='screen',
+        condition=IfCondition(enable_ekf),
         parameters=[ekf_yaml, sim_time_param],
         additional_env=DDS_CROSS,
     )
@@ -214,8 +222,9 @@ def generate_launch_description():
     # ==================================================================
     return LaunchDescription([
         declare_use_sim_time,
+        declare_enable_ekf,
 
-        # 1. EKF (odom + IMU fusion)
+        # 1. Optional EKF (odom + IMU fusion)
         ekf_node,
 
         # 2. SLAM

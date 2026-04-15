@@ -121,6 +121,7 @@ Or launch components individually:
 | Parameter | Default | Description |
 |---|---|---|
 | `use_sim_time` | `false` (`true` for Gazebo) | Use simulation clock |
+| `enable_ekf` | `false` | Launch `robot_localization` EKF in `minimal_nav2` and `full_mission` |
 | `launch_mission` | `true` | Enable mission nodes (Gazebo launch only) |
 
 ## Nodes
