@@ -24,7 +24,8 @@ class SearchServer(Node):
         # --- SEARCH CONFIGURATION ---
         # Offsets (delta_x, delta_y) relative to the robot's STARTING position
         #self.relative_search_offsets = [(0.4, 1.6), (2.6, 3.5)] <-- for gazebo
-        self.relative_search_offsets = [(0.3, 0.7), (1.1, 1.7)]
+        #self.relative_search_offsets = [(0.3, 0.7), (1.1, 1.7)]
+        self.relative_search_offsets = [(-0.75, -0.3), (1.25, 2.7)]
         
         # Internal variables to hold the calculated global coordinates
         self.absolute_search_zones = []

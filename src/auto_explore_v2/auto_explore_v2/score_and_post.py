@@ -10,11 +10,27 @@ from nav_msgs.msg import OccupancyGrid
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from std_msgs.msg import String
-from std_srvs.srv import SetBool
+from std_srvs.srv import Empty, SetBool
 from tf2_ros import ConnectivityException, ExtrapolationException, LookupException
 
 PATH_BLOCKED_OCCUPANCY_MIN = 51
 PREFLIGHT_TIMEOUT_SEC = 10.0
+
+# --- EXPLORATION TUNING PARAMETERS ---
+# Penalty subtracted from a frontier's score if it fails the is_path_clear wall-clipping check.
+# High values heavily stagger stubborn/blocked frontiers toward the end of exploration.
+PATH_BLOCKED_PENALTY = 1000
+
+# Penalty subtracted from a frontier's score if Nav2 fails to execute the path and physically times out.
+TIMEOUT_PENALTY = 500
+
+# Assumed robot speed (m/s) used to calculate dynamic timeouts. 
+# Lower values give the robot proportionately more time to traverse long paths.
+DYNAMIC_TIMEOUT_SPEED = 0.10
+
+# Flat maximum time buffer (seconds) added to the dynamic timeout to allow for tight maneuvers and recovery spins.
+DYNAMIC_TIMEOUT_BUFFER = 40.0
+# -------------------------------------
 
 
 class ScoreAndPostNode(Node):
@@ -30,6 +46,11 @@ class ScoreAndPostNode(Node):
             SetBool,
             'toggle_exploration',
             self.toggle_callback
+        )
+        self.clear_blacklist_service = self.create_service(
+            Empty,
+            'clear_blacklist',
+            self.clear_blacklist_callback
         )
 
         self.status_pub = self.create_publisher(String, '/mission_status', 10)
@@ -62,7 +83,8 @@ class ScoreAndPostNode(Node):
         self.map_data_subscription()
         self.nav2_server_subscription()
         self.nav2_goal_pub = self.create_publisher(PoseStamped, '/goal_pose', 10)
-        self.blacklist = {}
+        self.frontier_attempts = {}
+        self.timeout_attempts = {}
 
         # Timeout settings
         self.declare_parameter('nav2_goal_timeout_sec', 60.0)
@@ -140,6 +162,12 @@ class ScoreAndPostNode(Node):
         response.success = True
         return response
 
+    def clear_blacklist_callback(self, request, response):
+        self.frontier_attempts.clear()
+        self.timeout_attempts.clear()
+        self.get_logger().info('Map completion constraints relaxed. Blacklists and attempts wiped.')
+        return response
+
     def map_callback(self, msg):
         self.map_origin_x = msg.info.origin.position.x
         self.map_origin_y = msg.info.origin.position.y
@@ -187,7 +215,7 @@ class ScoreAndPostNode(Node):
         return None
 
     def frontier_to_world(self, frontier):
-        frontier_x, frontier_y = frontier
+        frontier_x, frontier_y = frontier[0], frontier[1]
         world_x = self.map_origin_x + frontier_x * self.map_resolution
         world_y = self.map_origin_y + frontier_y * self.map_resolution
         return world_x, world_y
@@ -228,7 +256,9 @@ class ScoreAndPostNode(Node):
                 self.get_logger().warning(f'Nav2 goal timed out after {goal_duration:.1f}s. Blacklisting and retrying.')
                 
                 if self.active_goal_frontier:
-                    self.blacklist_frontier_cluster(self.active_goal_frontier)
+                    frontier_key = self.frontier_key(self.active_goal_frontier)
+                    self.timeout_attempts[frontier_key] = self.timeout_attempts.get(frontier_key, 0) + 1
+                    self.get_logger().warning(f'Frontier {self.active_goal_frontier} timed out. Adding to timeout attempts penalty.')
                 
                 if self.current_goal_handle:
                     self.current_goal_handle.cancel_goal_async()
@@ -319,9 +349,6 @@ class ScoreAndPostNode(Node):
         frontier = self.active_goal_frontier
         frontier_key = self.frontier_key(frontier)
 
-        if frontier_key in self.blacklist:
-            return 'it has already been blacklisted'
-
         if hasattr(self, 'map_formatted_data'):
             occupancy = self.map_formatted_data.get(frontier)
             if (
@@ -361,19 +388,6 @@ class ScoreAndPostNode(Node):
         self.abandon_preflight_and_retry(goal_id, goal_frontier)
         return True
 
-    def blacklist_frontier_cluster(self, frontier):
-        if frontier is None:
-            return
-
-        self.blacklist[self.frontier_key(frontier)] = (
-            -float('inf'),
-            float('inf'),
-            -float('inf'),
-        )
-        self.get_logger().debug(
-            f'Added {frontier} to blacklist with score '
-            f'{self.blacklist[self.frontier_key(frontier)]}'
-        )
 
     def bfs_callback(self, msg):
         self.get_logger().debug('Received BFS distance transform data')
@@ -562,32 +576,59 @@ class ScoreAndPostNode(Node):
             return
 
         path = result.result.path
+        
+        frontier_key = self.frontier_key(goal_frontier)
+        attempts = self.frontier_attempts.get(frontier_key, 0)
+        
         if not path.poses:
-            self.blacklist_frontier_cluster(goal_frontier)
-            self.clear_navigation_state()
-            self.get_logger().debug(
-                'Nav2 could not produce a usable path for frontier cluster '
-                f'{goal_frontier}; blacklisting it'
-            )
-            self.filter_frontiers()
-            return
+            self.frontier_attempts[frontier_key] = attempts + 1
+            if attempts < 2:
+                self.clear_navigation_state()
+                self.get_logger().debug(
+                    'Nav2 could not produce a usable path for frontier cluster '
+                    f'{goal_frontier}. Incrementing attempt count.'
+                )
+                self.filter_frontiers()
+                return
+            else:
+                self.get_logger().warning(
+                    f'Frontier {goal_frontier} has failed ComputePathToPose {attempts} times. '
+                    'Bypassing preflight checks and dispatching a Hail Mary to Nav2!'
+                )
+        else:
+            if attempts < 2:
+                path_is_clear, blocked_cells = self.is_path_clear(path)
+                if not path_is_clear:
+                    self.frontier_attempts[frontier_key] = attempts + 1
+                    self.clear_navigation_state()
+                    self.get_logger().debug(
+                        'Manual path validation found blocked cells for frontier '
+                        f'cluster {goal_frontier}. Incrementing attempt count.'
+                    )
+                    self.filter_frontiers()
+                    return
+                self.get_logger().debug(
+                    f'Computed path with {len(path.poses)} poses for frontier '
+                    f'{goal_frontier}; manual path validation passed'
+                )
+            else:
+                self.get_logger().warning(
+                    f'Frontier {goal_frontier} has failed is_path_clear {attempts} times. '
+                    'Bypassing manual pixel checks and performing a Hail Mary dispatch directly to Nav2!'
+                )
+        
+        if path.poses:
+            path_length_meters = len(path.poses) * self.map_resolution
+        else:
+            robot_position = self.update_robot_position()
+            if robot_position:
+                euclidean_dist = self.calculate_distance_score(goal_frontier, robot_position)
+                path_length_meters = euclidean_dist * 1.5  # Heuristic multiplier for blind maze paths
+            else:
+                path_length_meters = 15.0
 
-        path_is_clear, blocked_cells = self.is_path_clear(path)
-        if not path_is_clear:
-            self.blacklist_frontier_cluster(goal_frontier)
-            self.clear_navigation_state()
-            self.get_logger().debug(
-                'Manual path validation found blocked cells for frontier '
-                f'cluster {goal_frontier}; blocked cells sample: '
-                f'{blocked_cells[:10]}'
-            )
-            self.filter_frontiers()
-            return
-
-        self.get_logger().debug(
-            f'Computed path with {len(path.poses)} poses for frontier '
-            f'{goal_frontier}; manual path validation passed'
-        )
+        self.goal_timeout_sec = (path_length_meters / DYNAMIC_TIMEOUT_SPEED) + DYNAMIC_TIMEOUT_BUFFER
+        self.get_logger().debug(f'Dynamic timeout for local path length {path_length_meters:.1f}m set to {self.goal_timeout_sec:.1f}s')
 
         navigate_goal = NavigateToPose.Goal()
         navigate_goal.pose = goal_pose
@@ -643,7 +684,7 @@ class ScoreAndPostNode(Node):
         if robot_position is None:
             return 0.0
 
-        frontier_x, frontier_y = frontier
+        frontier_x, frontier_y = frontier[0], frontier[1]
         robot_x, robot_y = robot_position
         distance = (
             (frontier_x - robot_x) ** 2 + (frontier_y - robot_y) ** 2
@@ -662,23 +703,7 @@ class ScoreAndPostNode(Node):
 
         if not hasattr(self, 'frontiers') or not isinstance(self.frontiers, list) or not self.frontiers:
             if self.exploration_active:
-                self.get_logger().info('ZERO valid frontiers remaining. MAP COMPLETE. Terminating exploration.')
-                self.exploration_active = False
-
-                # Stop the robot immediately if it is currently moving
-                if self.navigation_in_progress and self.current_goal_handle:
-                    self.get_logger().debug('Canceling final Nav2 goal...')
-                    self.current_goal_handle.cancel_goal_async()
-                if self.preflight_in_progress and self.current_preflight_goal_handle:
-                    self.get_logger().debug('Canceling active preflight goal...')
-                    self.current_preflight_goal_handle.cancel_goal_async()
-
-                self.clear_navigation_state()
-
-                # Tell the coordinator that exploration is done
-                msg = {'sender': 'explorer', 'status': 'EXPLORATION_COMPLETE', 'data': None}
-                self.status_pub.publish(String(data=json.dumps(msg)))
-                self.get_logger().info('Published EXPLORATION_COMPLETE to /mission_status')
+                self.get_logger().info('ZERO valid frontiers remaining. Waiting for fresh frontiers from sensors...')
             else:
                 self.get_logger().warning(
                     'Frontiers data not yet available or invalid or empty; skipping scoring.'
@@ -700,7 +725,7 @@ class ScoreAndPostNode(Node):
         robot_position = self.update_robot_position()
         self.scored_frontiers = {}
         for frontier in self.frontiers:
-            frontier_key = str(tuple(frontier))
+            frontier_key = str(tuple(frontier[:2]))
             if frontier_key in self.bfs_data:
                 bfs_score = self.bfs_data[frontier_key]
                 if bfs_score == float('inf'):
@@ -712,18 +737,25 @@ class ScoreAndPostNode(Node):
                     frontier,
                     robot_position,
                 )
-                blacklist_score = 0
-                self.scored_frontiers[frontier_key] = (
-                    bfs_score,
-                    -distance_score,
-                    blacklist_score,
-                )
+                
+                attempts = self.frontier_attempts.get(frontier_key, 0)
+                timeouts = self.timeout_attempts.get(frontier_key, 0)
+                
+                # is_path_clear failures get -PATH_BLOCKED_PENALTY, timeout failures get -TIMEOUT_PENALTY penalty
+                penalty = (-PATH_BLOCKED_PENALTY * attempts) + (-TIMEOUT_PENALTY * timeouts)
+                
+                # Unify into a single competitive score
+                frontier_size = frontier[2] if len(frontier) > 2 else 0
+                size_bonus = frontier_size * 1.5  # Tuned down to 1.5 to balance nicely with distance
+                
+                final_score = bfs_score + size_bonus - distance_score + penalty
+                
+                self.scored_frontiers[frontier_key] = final_score
             else:
                 self.get_logger().warning(
                     f'Frontier {frontier_key} not found in BFS data; skipping.'
                 )
 
-        self.scored_frontiers.update(self.blacklist)
         self.choose_best_frontier()
 
     def choose_best_frontier(self):
@@ -755,32 +787,15 @@ class ScoreAndPostNode(Node):
             reverse=True,
         )
         
-        all_blacklisted = True
         for frontier in ranked_frontiers:
-            if frontier not in self.blacklist:
-                all_blacklisted = False
-                
-            if frontier in self.blacklist:
-                continue
             if frontier == str(self.last_goal_frontier):
                 continue
             best_frontier = frontier
             break
 
-        if all_blacklisted and ranked_frontiers:
-            if self.exploration_active:
-                self.get_logger().info(
-                    'All remaining frontiers are unreachable (blacklisted). MAP COMPLETE. Terminating exploration early.'
-                )
-                self.exploration_active = False
-                self.clear_navigation_state()
-                msg = {'sender': 'explorer', 'status': 'EXPLORATION_COMPLETE', 'data': None}
-                self.status_pub.publish(String(data=json.dumps(msg)))
-            return
-
         if best_frontier is None:
             self.get_logger().debug(
-                'No new scored frontier is available for preflight.'
+                'No new scored frontier is available for preflight. Waiting in idle.'
             )
             return
 
@@ -835,10 +850,22 @@ class ScoreAndPostNode(Node):
             return
         try:
             result = future.result()
-            self.get_logger().debug(
-                'Navigation result received for frontier '
-                f'{goal_frontier} with status {result.status}: {result.result}'
-            )
+            from action_msgs.msg import GoalStatus
+            
+            if result.status == GoalStatus.STATUS_SUCCEEDED:
+                self.get_logger().info(
+                    f'Successfully reached frontier {goal_frontier}.'
+                )
+            else:
+                self.get_logger().warning(
+                    'Navigation failed/aborted for frontier '
+                    f'{goal_frontier} with status {result.status}'
+                )
+                # Terminal Strike: Nav2 failed execution. Let the penalty dynamically drop its priority.
+                frontier_key = self.frontier_key(goal_frontier)
+                attempts = self.frontier_attempts.get(frontier_key, 0)
+                if attempts >= 2:
+                    self.get_logger().error(f"Navigation to {goal_frontier} intrinsically failed after 3 attempts.")
         except Exception as error:
             self.get_logger().error(
                 f'Error in navigation result callback: {error}'

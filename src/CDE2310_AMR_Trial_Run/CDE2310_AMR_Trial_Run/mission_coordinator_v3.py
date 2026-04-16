@@ -4,7 +4,7 @@ import json
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from std_msgs.msg import String
-from std_srvs.srv import SetBool
+from std_srvs.srv import Empty, SetBool
 from tf2_ros import Buffer, TransformListener
 from tf2_ros import TransformException
 
@@ -42,7 +42,7 @@ class MissionCoordinator(Node):
         # --- TIMEOUT PARAMETERS ---
         self.declare_parameter('master_mission_timeout', 1200.0)
         self.master_mission_timeout = self.get_parameter('master_mission_timeout').get_parameter_value().double_value
-        self.declare_parameter('initial_exploration_timeout', 300.0)
+        self.declare_parameter('initial_exploration_timeout', 480.0)
         self.initial_exploration_timeout = self.get_parameter('initial_exploration_timeout').get_parameter_value().double_value
         self.declare_parameter('delivery_timeout', 90.0)
         self.delivery_timeout = self.get_parameter('delivery_timeout').get_parameter_value().double_value
@@ -76,8 +76,13 @@ class MissionCoordinator(Node):
         
         # Exploration Service
         self.toggle_explore_client = self.create_client(SetBool, 'toggle_exploration')
+        self.clear_blacklist_client = self.create_client(Empty, 'clear_blacklist')
         while not self.toggle_explore_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().debug(f"{ROBOT_NAME} is waiting for /toggle_exploration service...")
+        
+        # Don't block indefinitely on clear_blacklist, it might not be up instantly
+        if self.clear_blacklist_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().debug(f"{ROBOT_NAME} found /clear_blacklist service.")
             
         # Main Loop
         self.timer = self.create_timer(0.1, self.tick)
@@ -205,14 +210,8 @@ class MissionCoordinator(Node):
             status = status_data.get('status')
             data = status_data.get('data') # 'data' contains the tag name from the Docker
             
-            # 1. Handle Exploration Completion
-            if sender == 'explorer' and status == 'EXPLORATION_COMPLETE':
-                if self.state == 'EXPLORING':
-                    self.exploration_completed = True
-                    self.resume_mission()
-                    
             # 2. Handle Docking Success
-            elif sender == 'docker' and status == 'DOCKING_COMPLETE':
+            if sender == 'docker' and status == 'DOCKING_COMPLETE':
                 if self.state == 'DOCKING':
                     if not self.enable_delivery:
                         self.docked_tags.add(data)
@@ -274,7 +273,8 @@ class MissionCoordinator(Node):
                 self.state = 'MISSION_COMPLETE'
                 self.get_logger().info(f"{ROBOT_NAME} shouts MISSION ACCOMPLISHED! All target tags are processed and the map is complete.")
             else:
-                self.get_logger().info(f"{ROBOT_NAME} processed all target tags, but the map is not complete. {ROBOT_NAME} is resuming exploration to finish the map.")
+                self.get_logger().info(f"{ROBOT_NAME} processed all target tags, but the map is not complete. Relaxing constraints and resuming exploration to finish the map.")
+                self.clear_blacklist_client.call_async(Empty.Request())
                 self.start_exploration()
             return
             

@@ -7,16 +7,14 @@ Replaces these 4 terminal commands:
   2. ros2 run rviz2 rviz2 -d .../nav2_default_view.rviz
   3. ros2 launch CDE2310_AMR_Trial_Run mission.launch.py use_sim_time:=false
   4. ros2 launch auto_explore_v2 auto_explore.launch.py use_sim_time:=false
-
-Usage:
-  ros2 launch CDE2310_AMR_Trial_Run full_mission.launch.py
 """
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -28,8 +26,17 @@ def generate_launch_description():
     pkg_dir = get_package_share_directory('CDE2310_AMR_Trial_Run')
     nav2_yaml = os.path.join(pkg_dir, 'config', 'minimal_nav2.yaml')
     cartographer_config_dir = os.path.join(pkg_dir, 'config')
+    
+    # RViz Config Path
     rviz_config = os.path.join(
         get_package_share_directory('nav2_bringup'), 'rviz', 'nav2_default_view.rviz')
+        
+    # Mission and Exploration Launch Paths
+    mission_launch_path = os.path.join(
+        pkg_dir, 'launch', 'mission.launch.py')
+        
+    auto_explore_launch_path = os.path.join(
+        get_package_share_directory('auto_explore_v2'), 'launch', 'auto_explore.launch.py')
 
     # ------------------------------------------------------------------
     # Launch arguments
@@ -66,7 +73,7 @@ def generate_launch_description():
         output='screen',
         parameters=[
             sim_time_param,
-            {'resolution': 0.05},
+            {'resolution': 0.025}, # Updated to match your high-res tight maze config
             {'publish_period_sec': 1.0},
         ],
         arguments=['--ros-args', '--log-level', 'WARN'],
@@ -117,104 +124,66 @@ def generate_launch_description():
         name='lifecycle_manager_navigation',
         output='screen',
         parameters=[
-            sim_time_param,
+            {'use_sim_time': use_sim_time},
             {'autostart': True},
-            {'node_names': [
-                'planner_server',
-                'controller_server',
-                'behavior_server',
-                'bt_navigator',
-            ]},
-            {'bond_timeout': 8.0},
-        ],
-        arguments=['--ros-args', '--log-level', 'WARN'],
+            {'node_names': ['planner_server',
+                            'controller_server',
+                            'behavior_server',
+                            'bt_navigator']}
+        ]
     )
 
     # ==================================================================
-    # 3. RViz
+    # 3. Visualization
     # ==================================================================
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
-        output='screen',
-        arguments=['-d', rviz_config, '--ros-args', '--log-level', 'WARN'],
-    )
-
-    # ==================================================================
-    # 4. Mission nodes (search, docking, delivery, coordinator)
-    # ==================================================================
-    search_server = Node(
-        package='CDE2310_AMR_Trial_Run',
-        executable='search_server',
-        name='search_server',
-        output='screen',
+        arguments=['-d', rviz_config],
         parameters=[sim_time_param],
-    )
-
-    docking_server = Node(
-        package='CDE2310_AMR_Trial_Run',
-        executable='docking_server',
-        name='docking_server',
-        output='screen',
-        parameters=[sim_time_param],
-    )
-
-    # NOTE: delivery_server runs on the RPi (needs local access to /fire_ball service)
-
-    mission_coordinator = Node(
-        package='CDE2310_AMR_Trial_Run',
-        executable='mission_coordinator',
-        name='mission_coordinator',
-        output='screen',
-        parameters=[sim_time_param],
+        output='screen'
     )
 
     # ==================================================================
-    # 5. Auto-explore (frontier finding + scoring)
+    # 4. Mission & Exploration (DELAYED LAUNCH)
     # ==================================================================
-    find_frontiers = Node(
-        package='auto_explore_v2',
-        executable='find_frontiers',
-        name='auto_explore',
-        output='screen',
-        parameters=[sim_time_param],
+    delayed_mission_launch = TimerAction(
+        period=15.0,  # Wait 15 seconds for SLAM and Nav2 to stabilize
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(mission_launch_path),
+                launch_arguments={'use_sim_time': use_sim_time}.items()
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(auto_explore_launch_path),
+                launch_arguments={'use_sim_time': use_sim_time}.items()
+            )
+        ]
     )
 
-    score_and_post = Node(
-        package='auto_explore_v2',
-        executable='score_and_post',
-        name='score_and_post',
-        output='screen',
-        parameters=[sim_time_param],
-    )
-
     # ==================================================================
-    # Assemble
+    # Build Launch Description
     # ==================================================================
-    return LaunchDescription([
-        declare_use_sim_time,
+    ld = LaunchDescription()
+    
+    ld.add_action(declare_use_sim_time)
+    
+    # SLAM
+    ld.add_action(cartographer_node)
+    ld.add_action(cartographer_occupancy_grid_node)
+    
+    # Nav2
+    ld.add_action(planner_server)
+    ld.add_action(controller_server)
+    ld.add_action(behavior_server)
+    ld.add_action(bt_navigator)
+    ld.add_action(lifecycle_manager_navigation)
+    
+    # UI
+    ld.add_action(rviz_node)
+    
+    # Delayed High-Level Logic
+    ld.add_action(delayed_mission_launch)
 
-        # 1. SLAM
-        cartographer_node,
-        cartographer_occupancy_grid_node,
-
-        # 2. Nav2
-        planner_server,
-        controller_server,
-        behavior_server,
-        bt_navigator,
-        lifecycle_manager_navigation,
-
-        # 3. RViz
-        rviz_node,
-
-        # 4. Mission
-        search_server,
-        docking_server,
-        mission_coordinator,
-
-        # 5. Auto-explore
-        find_frontiers,
-        score_and_post,
-    ])
+    return ld

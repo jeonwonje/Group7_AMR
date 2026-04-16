@@ -193,8 +193,8 @@ class AutoExploreNode(Node):
 
         self.frontier_clusters = self.cluster_frontiers(self.raw_frontiers)
         self.frontiers = [
-            (frontier_x, frontier_y)
-            for frontier_x, frontier_y, _ in self.frontier_clusters
+            (frontier_x, frontier_y, cluster_size)
+            for frontier_x, frontier_y, cluster_size in self.frontier_clusters
         ]
         self.get_logger().debug(
             f'Clustered {len(self.raw_frontiers)} raw frontier cells into '

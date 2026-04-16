@@ -70,12 +70,12 @@ class DockingServer(Node):
             self.declare_parameter('use_sim_time', False)
         
         # --- DOCKING PARAMETERS ---
-        self.staging_distance = 0.60       
+        self.staging_distance = 0.40       
         self.stop_distance = 0.10        
 
         # --- ROBUSTNESS PARAMETERS ---
         self.fallback_staging_offset = 0.15
-        self.max_docking_time = 180.0        
+        self.max_docking_time = 240.0        
         self.sensor_drop_tolerance = 1.0    
         
         # --- REFINEMENT PARAMETERS ---
@@ -101,7 +101,7 @@ class DockingServer(Node):
         self.backup_duration = 3.0        
 
         # --- UNDOCKING PARAMETERS ---
-        self.undock_distance = 0.4        
+        self.undock_distance = 0.20        
         self.undock_speed = -0.15         
 
         # Internal State Machine
@@ -152,8 +152,23 @@ class DockingServer(Node):
                 self.saved_target_pose_odom = None
                 self.docking_start_time = self.get_clock().now()
                 self.fallback_attempted = False
+                self.last_goal_update_time = None
                 
-                self.get_logger().debug(f"Initiating Nav2 Staging for {self.target_frame}.")
+                # Check if we are ALREADY close enough to bypass Nav2 staging entirely!
+                try:
+                    if self.tf_buffer.can_transform('base_link', self.target_frame, rclpy.time.Time()):
+                        t_base = self.tf_buffer.lookup_transform('base_link', self.target_frame, rclpy.time.Time())
+                        dist_to_tag = math.hypot(t_base.transform.translation.x, t_base.transform.translation.y)
+                        
+                        # If robot is within 0.20m of the staging goal, skip Nav2
+                        if dist_to_tag < (self.staging_distance + 0.20):
+                            self.get_logger().info(f"Target found at {dist_to_tag:.2f}m. Extremely close to staging distance. Bypassing Nav2!")
+                            self.state = 'COMPUTE_GEOMETRY'
+                            return
+                except TransformException:
+                    pass
+                
+                self.get_logger().info(f"Initiating Nav2 Staging for {self.target_frame}.")
                 self.state = 'NAV_TO_STAGING'
                 self.send_staging_goal(self.staging_distance)
                 
@@ -173,6 +188,7 @@ class DockingServer(Node):
 
     def abort_docking_sequence(self, send_status=True):
         self.state = 'IDLE'
+        self.docking_start_time = None
         self.cmd_vel_pub.publish(Twist())
         if send_status:
             self.send_status('DOCKING_FAILED', self.target_tag)
@@ -205,8 +221,7 @@ class DockingServer(Node):
                     global_staging_pose.header.stamp = self.get_clock().now().to_msg()
                     global_staging_pose.pose = global_pose
                 except TransformException as e:
-                    self.get_logger().error(f"Transformation failed: {e}")
-                    self.handle_nav_failure()
+                    self.get_logger().warn(f"Transformation failed: {e}. Retrying...")
                     return
                 
                 global_staging_pose.pose.position.z = 0.0
@@ -223,8 +238,10 @@ class DockingServer(Node):
                 self.send_goal_future.add_done_callback(self.nav_goal_response_callback)
                 
                 self.last_goal_update_time = self.get_clock().now()
-        except TransformException:
-            self.handle_nav_failure()
+            else:
+                self.get_logger().debug(f"Waiting for TF propagation: {self.target_frame} -> map...")
+        except TransformException as e:
+            self.get_logger().warn(f"TF exception: {e}. Waiting for tree...")
 
     def nav_goal_response_callback(self, future):
         goal_handle = future.result()
@@ -257,6 +274,9 @@ class DockingServer(Node):
 
     def refine_staging_pose(self):
         if self.last_goal_update_time is None:
+            # TF wasn't ready during the initial sweep, so keep attempting to send the first goal
+            current_target_dist = self.staging_distance - self.fallback_staging_offset if self.fallback_attempted else self.staging_distance
+            self.send_staging_goal(current_target_dist)
             return
             
         now = self.get_clock().now()
@@ -374,6 +394,17 @@ class DockingServer(Node):
 
         # 3. Handle Nav2 Staging State
         if self.state == 'NAV_TO_STAGING':
+            # Failsafe: If Nav2 completely hangs on a staging goal (e.g. planner deadlock)
+            if self.last_goal_update_time:
+                nav_duration = (self.get_clock().now() - self.last_goal_update_time).nanoseconds / 1e9
+                if nav_duration > 60.0:
+                    self.get_logger().warn("Nav2 Staging DEADLOCKED for 60 seconds! Forcing manual geometric servoing intercept.")
+                    if self.current_goal_handle:
+                        self.current_goal_handle.cancel_goal_async()
+                        self.current_goal_handle = None
+                    self.state = 'COMPUTE_GEOMETRY'
+                    return
+
             self.refine_staging_pose()
             return # Let Nav2 finish its job. Do not execute servoing logic below.
 
@@ -476,6 +507,7 @@ class DockingServer(Node):
                 self.get_logger().info("DOCKING SEQUENCE COMPLETE.")
                 self.cmd_vel_pub.publish(Twist())
                 self.send_status('DOCKING_COMPLETE', self.target_tag)
+                self.docking_start_time = None
                 self.state = 'IDLE'
             else:
                 cmd.linear.x = self.slow_linear_speed
