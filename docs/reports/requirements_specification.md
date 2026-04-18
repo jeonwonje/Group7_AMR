@@ -62,8 +62,8 @@ a custom spring-loaded launcher payload.
 
 | ID       | Requirement                                                                 | Traces to |
 |----------|-----------------------------------------------------------------------------|-----------|
-| FR-DET-01 | The AMR shall detect tag36h11 AprilTag markers using an on-board RPi Camera V2 and the `apriltag` library. | ConOps §5.4 |
-| FR-DET-02 | The AMR shall compute the 6-DOF pose of each detected marker via solvePnP and publish the result as a TF transform. | ConOps §5.4 |
+| FR-DET-01 | The AMR shall detect tag36h11 AprilTag markers using an on-board RPi Camera V2 and the external `apriltag_ros` ROS 2 package. | ConOps §5.4 |
+| FR-DET-02 | The `apriltag_ros` package shall compute the 6-DOF pose of each detected marker and publish it as a TF transform plus an `AprilTagDetectionArray` on `/detections`. | ConOps §5.4 |
 | FR-DET-03 | The mission coordinator shall monitor the TF tree for target tags (`tag36h11:0`, `tag36h11:2`) with a staleness threshold of 0.5 s. | ConOps §5.4 |
 
 ### 4.3  Docking
@@ -104,7 +104,7 @@ a custom spring-loaded launcher payload.
 | NFR-05   | Reliability | The system shall tolerate camera dropout for up to 1.0 s during docking without aborting. |
 | NFR-06   | Reliability | The system shall handle Nav2 goal rejection by applying a fallback staging offset (−0.15 m). |
 | NFR-07   | Power       | The RPi and launcher shall operate from the TurtleBot3 11.1 V LiPo battery via buck converter for the full mission duration. |
-| NFR-08   | Comms       | DDS discovery between RPi and laptop shall use FastDDS unicast (no multicast). |
+| NFR-08   | Comms       | DDS discovery between RPi and laptop shall use CycloneDDS with unicast peers (no multicast). FastRTPS is used only as a Gazebo/WSL2 fallback (issue #19). |
 
 ---
 

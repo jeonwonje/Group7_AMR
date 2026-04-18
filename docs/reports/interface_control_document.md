@@ -26,9 +26,9 @@ that all interfaces are correctly wired.
 
 | # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile          | Machine |
 |---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
-| 1 | `/scan`                  | `sensor_msgs/LaserScan`              | LDS-02 driver          | Cartographer, auto_nav               | Best-effort, volatile | RPi     |
-| 2 | `/camera/image_raw`      | `sensor_msgs/Image`                  | v4l2_camera            | apriltag_detector                    | Best-effort, volatile | RPi     |
-| 3 | `/camera/camera_info`    | `sensor_msgs/CameraInfo`            | v4l2_camera            | apriltag_detector                    | Best-effort, volatile | RPi     |
+| 1 | `/scan`                  | `sensor_msgs/LaserScan`              | LDS-02 driver          | Cartographer, Nav2 costmap           | Best-effort, volatile | RPi     |
+| 2 | `/camera/image_raw`      | `sensor_msgs/Image`                  | v4l2_camera            | apriltag_ros                         | Best-effort, volatile | RPi     |
+| 3 | `/camera/camera_info`    | `sensor_msgs/CameraInfo`            | v4l2_camera            | apriltag_ros                         | Best-effort, volatile | RPi     |
 | 4 | `/imu`                   | `sensor_msgs/Imu`                   | OpenCR                 | Cartographer                         | Best-effort, volatile | RPi     |
 | 5 | `/odom`                  | `nav_msgs/Odometry`                 | OpenCR (diff-drive)    | Cartographer, Nav2                   | Best-effort, volatile | RPi     |
 
@@ -36,32 +36,31 @@ that all interfaces are correctly wired.
 
 | # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile           | Machine |
 |---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
-| 6 | `/map`                   | `nav_msgs/OccupancyGrid`            | Cartographer           | find_frontiers, search_stations, auto_nav | Reliable, transient local | Laptop  |
+| 6 | `/map`                   | `nav_msgs/OccupancyGrid`            | Cartographer           | find_frontiers, score_and_post, search_stations, Nav2 costmap | Reliable, transient local | Laptop  |
 | 7 | `/goal_pose`             | `geometry_msgs/PoseStamped`          | score_and_post         | Nav2 bt_navigator                    | Reliable, volatile    | Laptop  |
-| 8 | `/cmd_vel`               | `geometry_msgs/Twist`                | Nav2 controller / docking_server / search_stations / auto_nav | OpenCR | Reliable, volatile | Both    |
+| 8 | `/cmd_vel`               | `geometry_msgs/Twist`                | Nav2 controller / docking_server / search_stations | OpenCR | Reliable, volatile | Both    |
 
 ### 2.3  Perception Topics
 
 | # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile          | Machine |
 |---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
-| 9 | `/marker_detection`      | `std_msgs/String` (JSON)             | apriltag_detector      | (debug / logging)                    | Best-effort, volatile | RPi     |
-| 10| `/apriltag_debug_image`  | `sensor_msgs/Image`                  | apriltag_detector      | RViz (debug)                         | Best-effort, volatile | RPi     |
-| 11| `/detections`            | `apriltag_msgs/AprilTagDetectionArray` | apriltag detector (RPi) | delivery_server                   | Best-effort, volatile | RPi     |
+| 9 | `/detections`            | `apriltag_msgs/AprilTagDetectionArray` | apriltag_ros (RPi)   | delivery_server                      | Best-effort, volatile | RPi     |
+| 10| `/tf`                    | `tf2_msgs/TFMessage` (`camera_link → tag36h11:<id>`) | apriltag_ros | mission_coordinator, docking_server | Reliable, volatile | RPi     |
 
 ### 2.4  Mission Coordination Topics
 
 | # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile          | Machine |
 |---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
-| 12| `/mission_command`       | `std_msgs/String` (JSON)             | mission_coordinator    | docker, delivery_server, search_stations | Reliable, volatile | Laptop  |
-| 13| `/mission_status`        | `std_msgs/String` (JSON)             | docker, delivery_server (as deliverer), search_stations, score_and_post | mission_coordinator | Reliable, volatile | Both |
+| 11| `/mission_command`       | `std_msgs/String` (JSON)             | mission_coordinator    | docker, delivery_server, search_stations | Reliable, volatile | Laptop  |
+| 12| `/mission_status`        | `std_msgs/String` (JSON)             | docker (`sender: docker`), delivery_server (`sender: deliverer`), search_stations (`sender: searcher`), score_and_post | mission_coordinator | Reliable, volatile | Both |
 
 ### 2.5  Exploration-Internal Topics
 
 | # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile          | Machine |
 |---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
-| 14| `frontiers`              | `std_msgs/String` (JSON)             | find_frontiers         | score_and_post                       | Reliable, volatile   | Laptop  |
-| 15| `bfs_distance_transform` | `std_msgs/String` (JSON)             | find_frontiers         | score_and_post                       | Reliable, volatile   | Laptop  |
-| 16| `/nav_status`            | `std_msgs/String`                    | score_and_post         | find_frontiers                       | Best-effort, volatile | Laptop  |
+| 13| `frontiers`              | `std_msgs/String` (JSON)             | find_frontiers         | score_and_post                       | Reliable, volatile   | Laptop  |
+| 14| `bfs_distance_transform` | `std_msgs/String` (JSON)             | find_frontiers         | score_and_post                       | Reliable, volatile   | Laptop  |
+| 15| `/nav_status`            | `std_msgs/String`                    | score_and_post         | find_frontiers                       | Best-effort, volatile | Laptop  |
 
 ---
 
@@ -101,15 +100,15 @@ All commands are JSON-encoded `std_msgs/String` messages on `/mission_command`.
 
 ### 3.4  Status Catalogue
 
-| Sender      | Status                 | Data                | Meaning                                |
-|-------------|------------------------|---------------------|----------------------------------------|
-| `explorer`  | `EXPLORATION_COMPLETE` | —                   | All frontiers visited                  |
-| `docker`    | `DOCKING_COMPLETE`     | `tag36h11:<id>`     | Robot docked at tag                    |
-| `docker`    | `DOCKING_FAILED`       | `tag36h11:<id>`     | Docking aborted (timeout/geometry)     |
-| `docker`    | `UNDOCKING_COMPLETE`   | —                   | Robot cleared from tag                 |
-| `deliverer` | `BALL_FIRED`           | shot detail         | Single ball confirmed fired            |
-| `deliverer` | `DELIVERY_COMPLETE`    | `tag36h11:<id>`     | All balls delivered at station         |
-| `searcher`  | `SEARCH_FAILED`        | —                   | All search zones exhausted, no tag     |
+| Sender            | Status                 | Data                | Meaning                                |
+|-------------------|------------------------|---------------------|----------------------------------------|
+| `score_and_post`  | `EXPLORATION_COMPLETE` | —                   | All frontiers visited                  |
+| `docker`          | `DOCKING_COMPLETE`     | `tag36h11:<id>`     | Robot docked at tag                    |
+| `docker`          | `DOCKING_FAILED`       | `tag36h11:<id>`     | Docking aborted (timeout/geometry)     |
+| `docker`          | `UNDOCKING_COMPLETE`   | —                   | Robot cleared from tag                 |
+| `deliverer`       | `BALL_FIRED`           | shot detail         | Single ball confirmed fired            |
+| `deliverer`       | `DELIVERY_COMPLETE`    | `tag36h11:<id>`     | All balls delivered at station         |
+| `searcher`        | `SEARCH_FAILED`        | —                   | All search zones exhausted, no tag     |
 
 ---
 
@@ -118,6 +117,7 @@ All commands are JSON-encoded `std_msgs/String` messages on `/mission_command`.
 | # | Service              | Type                   | Server                | Client(s)              | Machine |
 |---|----------------------|------------------------|-----------------------|------------------------|---------|
 | 1 | `toggle_exploration` | `std_srvs/SetBool`    | score_and_post        | mission_coordinator    | Laptop  |
+| 2 | `clear_blacklist`    | `std_srvs/Empty`      | score_and_post        | mission_coordinator    | Laptop  |
 
 
 ### 4.1  Service Details
@@ -126,6 +126,11 @@ All commands are JSON-encoded `std_msgs/String` messages on `/mission_command`.
 - `request.data = true` → resume frontier exploration.
 - `request.data = false` → pause (cancel active Nav2 goal, stop posting new goals).
 - `response.success` always `true`; `response.message` confirms the toggle state.
+
+**clear_blacklist (Empty):**
+Clears the frontier penalty blacklist accumulated by `score_and_post`. Called by
+the mission coordinator after successful dock/delivery cycles so penalised
+frontiers become eligible again.
 
 **delivery_server (consolidated):**
 The delivery_server directly controls the MG90 servo via GPIO 12 on the RPi.
@@ -172,8 +177,8 @@ shooter node or `/fire_ball` service.
                │              │
                │              └── camera_link
                │                   │
-               │                   ├── tag36h11:0  (dynamic, from apriltag_detector)
-               │                   ├── tag36h11:2  (dynamic, from apriltag_detector)
+               │                   ├── tag36h11:0  (dynamic, from apriltag_ros)
+               │                   ├── tag36h11:2  (dynamic, from apriltag_ros)
                │                   └── tag36h11:3  (dynamic, if visible)
                │
                └── (Cartographer submap frames)
@@ -184,7 +189,7 @@ shooter node or `/fire_ball` service.
 - `odom → base_footprint → base_link`: OpenCR odometry.
 - `base_link → base_scan`: static transform (URDF).
 - `base_link → camera_link`: static transform (launch file).
-- `camera_link → tag36h11:<id>`: apriltag_detector (dynamic, per-frame).
+- `camera_link → tag36h11:<id>`: `apriltag_ros` (dynamic, per-frame).
 
 **Stale TF policy:** The mission coordinator considers a tag transform stale if
 its timestamp is older than 0.5 s relative to `now()`. Stale transforms are
@@ -232,25 +237,28 @@ The LDS-02 LiDAR publishes 360° scans at ~5 Hz on the `/scan` topic.
 
 ### 8.1  DDS Configuration
 
-| Parameter              | Value                               |
-|------------------------|-------------------------------------|
-| DDS implementation     | FastDDS (eProsima)                  |
-| Discovery              | Unicast (no multicast)              |
-| RPi IP                 | 192.168.x.y (DHCP, static lease)   |
-| Laptop IP              | 192.168.x.z (DHCP, static lease)   |
-| ROS_DOMAIN_ID          | 30                                  |
+| Parameter              | Value                                                             |
+|------------------------|-------------------------------------------------------------------|
+| DDS (real robot)       | CycloneDDS (`rmw_cyclonedds_cpp`)                                 |
+| DDS (Gazebo sim, WSL2) | FastRTPS (`rmw_fastrtps_cpp`) — CycloneDDS fails under Gazebo/WSL2|
+| Discovery              | Unicast peer list (no multicast)                                  |
+| Discovery config       | `CYCLONEDDS_URI` → XML with explicit peer IP addresses            |
+| ROS_DOMAIN_ID          | Gazebo forces `0`; real robot per operator env (not set in launch)|
 
-**FastDDS XML profile** (set via `FASTRTPS_DEFAULT_PROFILES_FILE`):
+**CycloneDDS XML profile** (set via `CYCLONEDDS_URI`):
 - Disables multicast discovery.
 - Adds peer IP addresses for unicast initial-peers list.
-- Required on both machines for cross-machine topic discovery.
+- Required on both machines for cross-machine topic discovery under WSL2 mirrored networking.
 
 ### 8.2  Environment Variables (Both Machines)
 
 ```bash
-export ROS_DOMAIN_ID=30
+# Real robot (RPi + remote PC)
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI=file:///path/to/cyclonedds.xml
+
+# Gazebo sim on WSL2 (overrides the above)
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/fastdds_profile.xml
 ```
 
 ### 8.3  Time Synchronisation
