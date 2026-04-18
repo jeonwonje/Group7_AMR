@@ -74,7 +74,7 @@ class IntegratedDeliveryServer(Node):
     def _fire(self):
         if self._shutdown_requested: return
         self.pwm.ChangeDutyCycle(CCW_DUTY)
-        time.sleep(TIME_PER_REV * 1.5 * 0.30)
+        time.sleep(TIME_PER_REV * 1.5 * 0.40)
         self.pwm.ChangeDutyCycle(0)
         time.sleep(0.3)
 
