@@ -67,7 +67,7 @@ The system uses two custom ROS 2 packages:
 | Package | Purpose | Key Nodes |
 |---|---|---|
 | `auto_explore_v2` | Frontier exploration + scoring | `find_frontiers`, `score_and_post` |
-| `CDE2310_AMR_Trial_Run` | Mission coordination, docking, delivery | `mission_coordinator`, `docking_server`, `delivery_server`, `search_server`, `rpi_shooter_node` |
+| `CDE2310_AMR_Trial_Run` | Mission coordination, docking, delivery | `mission_coordinator`, `docker` (docking_server), `delivery_server`, `searcher` (search_stations) |
 
 ### Software Setup
 
@@ -118,11 +118,7 @@ ros2 launch apriltag_ros apriltag.launch.py
 ```
 ros2 launch auto_explore_v2 auto_explore.launch.py
 ```
-9. **Terminal 6** — Hardware shooter (runs on RPi):
-```
-ros2 run CDE2310_AMR_Trial_Run rpi_shooter_node
-```
-10. **Terminal 7** — Mission system:
+9. **Terminal 6** — Mission system (delivery server runs here and drives GPIO 12 directly; no separate shooter node):
 ```
 ros2 launch CDE2310_AMR_Trial_Run mission.launch.py
 ```

@@ -27,7 +27,7 @@ the Group 7 AMR project.
 | OS (RPi)       | Ubuntu 22.04 Server (arm64)                        |
 | ROS distro     | ROS 2 Humble Hawksbill                             |
 | Python         | 3.10.x (system Python, no virtual env for ROS)     |
-| DDS middleware  | FastDDS (eProsima) via `rmw_fastrtps_cpp`          |
+| DDS middleware  | CycloneDDS (`rmw_cyclonedds_cpp`); FastRTPS (`rmw_fastrtps_cpp`) only for Gazebo on WSL2 |
 | Build system   | colcon (v0.15+)                                    |
 | Package format | ament_python                                       |
 | IDE            | VS Code with ROS extension + Python extension      |
@@ -86,10 +86,7 @@ Group7_AMR/
 │   │   │   ├── mission_coordinator_v3.py
 │   │   │   ├── docker.py
 │   │   │   ├── delivery_server_consolidated.py
-│   │   │   ├── search_stations.py
-│   │   │   ├── launcher_node.py
-│   │   │   ├── apriltag_detector.py
-│   │   │   └── static_station.py
+│   │   │   └── search_stations.py
 │   │   ├── config/
 │   │   │   ├── slam_params.yaml
 │   │   │   └── minimal_nav2.yaml
@@ -183,8 +180,8 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 feat(dock): add fallback staging offset on Nav2 rejection
 fix(delivery): prevent double-fire during cooldown window
 docs(report): add G2 systems design documentation
-refactor(nav): consolidate 5 packages into 3
-test(pathfinding): add 29 unit tests for grid algorithms
+refactor(nav): consolidate scaffold packages into CDE2310_AMR_Trial_Run + auto_explore_v2
+chore(bringup): add Gazebo maze world and mission sim launch
 ```
 
 ---
@@ -242,7 +239,7 @@ All changes are recorded in `CHANGELOG.md` at the repository root, following
 | `tf2_geometry_msgs`         | Humble        | TF2 message conversions             |
 | `action_msgs`               | Humble        | GoalStatus                          |
 | `apriltag_msgs`             | Humble        | AprilTagDetectionArray              |
-| `cv_bridge`                 | Humble        | ROS Image ↔ OpenCV conversion       |
+| `apriltag_ros`              | Humble        | Tag36h11 detection + pose (RPi; external package) |
 | `turtlebot3_bringup`        | Humble        | Robot hardware bringup              |
 | `cartographer_ros`          | Humble        | SLAM                                |
 | `nav2_bringup`              | Humble        | Navigation stack launch             |
@@ -251,10 +248,9 @@ All changes are recorded in `CHANGELOG.md` at the repository root, following
 
 | Package     | Version   | Purpose                             |
 |-------------|-----------|--------------------------------------|
-| `numpy`     | ≥ 1.21    | Array operations for grid/pathfinding|
-| `opencv-python` | ≥ 4.5 | Image processing, solvePnP          |
-| `apriltag`  | ≥ 0.0.16  | AprilTag detection                  |
-| `pytest`    | ≥ 7.0     | Unit testing framework              |
+| `numpy`     | ≥ 1.21    | Array operations for maps/frontiers  |
+| `RPi.GPIO`  | ≥ 0.7 (RPi-only) | GPIO PWM for MG90 servo in `delivery_server` |
+| `pytest`    | ≥ 7.0     | Testing framework (lint/style suites)|
 
 ### 7.3  System Dependencies
 

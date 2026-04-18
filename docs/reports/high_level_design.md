@@ -27,7 +27,7 @@ and actuation run on the Raspberry Pi mounted to the robot.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          ROS 2 Humble (FastDDS)                             │
+│                         ROS 2 Humble (CycloneDDS)                           │
 │                                                                             │
 │  ┌──────────── Laptop ─────────────────┐  ┌────────── RPi 4B ───────────┐  │
 │  │                                     │  │                             │  │
@@ -37,8 +37,8 @@ and actuation run on the Raspberry Pi mounted to the robot.
 │  │  └────────────┬────────────┘        │  │  └───────────────────────┘  │  │
 │  │               │                     │  │                             │  │
 │  │  ┌────────────▼────────────┐        │  │  ┌───────────────────────┐  │  │
-│  │  │   Nav2 stack            │        │  │  │  apriltag_detector    │  │  │
-│  │  │   (planner, controller) │        │  │  │  /camera → TF, /marker│  │  │
+│  │  │   Nav2 stack            │        │  │  │  apriltag_ros (ext.)  │  │  │
+│  │  │   (planner, controller) │        │  │  │  /camera → TF,/detect.│  │  │
 │  │  └────────────┬────────────┘        │  │  └───────────────────────┘  │  │
 │  │               │                     │  │                             │  │
 │  │  ┌────────────▼────────────┐        │  │  ┌───────────────────────┐  │  │
@@ -67,7 +67,7 @@ and actuation run on the Raspberry Pi mounted to the robot.
 │  │  └─────────────────────────┘        │  │                             │  │
 │  └─────────────────────────────────────┘  └─────────────────────────────┘  │
 │                                                                             │
-│          ◄──────── FastDDS unicast over Wi-Fi ────────►                     │
+│          ◄─────── CycloneDDS unicast over Wi-Fi ───────►                    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,7 +110,7 @@ src/
  /scan topic          /camera/image_raw
       │                     │
       ▼                     ▼
- Cartographer         apriltag_detector
+ Cartographer         apriltag_ros (ext.)
       │                     │
       ├──► /map             ├──► TF: camera_link → tag36h11:<id>
       │                     │
@@ -154,14 +154,13 @@ All coordination flows through two JSON-encoded String topics:
 | Topic                | Type                 | Publisher(s)           | Subscriber(s)                   |
 |----------------------|----------------------|------------------------|---------------------------------|
 | `/map`               | OccupancyGrid        | Cartographer           | find_frontiers, search_stations |
-| `/scan`              | LaserScan            | LDS-02 driver          | Cartographer, auto_nav          |
-| `/cmd_vel`           | Twist                | Nav2, docking_server   | OpenCR (motor driver)           |
-| `/camera/image_raw`  | Image                | RPi camera driver      | apriltag_detector               |
-| `/mission_command`   | String (JSON)        | mission_coordinator    | docker, delivery_server, search |
-| `/mission_status`    | String (JSON)        | docker, deliverer, search, explorer | mission_coordinator  |
-| `/marker_detection`  | String (JSON)        | apriltag_detector      | (debug / logging)               |
+| `/scan`              | LaserScan            | LDS-02 driver          | Cartographer, Nav2              |
+| `/cmd_vel`           | Twist                | Nav2, docker          | OpenCR (motor driver)           |
+| `/camera/image_raw`  | Image                | RPi camera driver      | apriltag_ros (external)         |
+| `/mission_command`   | String (JSON)        | mission_coordinator    | docker, delivery_server, searcher |
+| `/mission_status`    | String (JSON)        | docker, deliverer, searcher, score_and_post | mission_coordinator |
 | `/goal_pose`         | PoseStamped          | score_and_post         | Nav2 planner                    |
-| `/detections`        | AprilTagDetectionArray | apriltag (RPi)       | delivery_server                 |
+| `/detections`        | AprilTagDetectionArray | apriltag_ros (RPi)   | delivery_server                 |
 | `frontiers`          | String (JSON)        | find_frontiers         | score_and_post                  |
 
 ### 5.2  ROS 2 Services
@@ -169,6 +168,7 @@ All coordination flows through two JSON-encoded String topics:
 | Service              | Type        | Server               | Client                |
 |----------------------|-------------|----------------------|-----------------------|
 | `toggle_exploration` | SetBool     | score_and_post       | mission_coordinator   |
+| `clear_blacklist`    | Empty       | score_and_post       | mission_coordinator   |
 
 ### 5.3  ROS 2 Actions
 
@@ -217,10 +217,10 @@ All coordination flows through two JSON-encoded String topics:
 | Layer         | Technology                                    |
 |---------------|-----------------------------------------------|
 | OS            | Ubuntu 22.04 (RPi + Laptop)                   |
-| Middleware    | ROS 2 Humble + FastDDS                        |
+| Middleware    | ROS 2 Humble + CycloneDDS (FastRTPS for Gazebo/WSL2) |
 | SLAM          | Cartographer (google_cartographer_ros)        |
-| Navigation    | Nav2 (for auto_explore_v2 stack) / custom A*  |
-| Perception    | Python `apriltag` library + OpenCV solvePnP   |
+| Navigation    | Nav2 (planner, controller, behaviours, BT)    |
+| Perception    | External `apriltag_ros` ROS 2 package         |
 | Build system  | colcon + ament_python                         |
 | Language      | Python 3.10                                   |
 | Version ctrl  | Git + GitHub                                  |
@@ -237,7 +237,7 @@ All coordination flows through two JSON-encoded String topics:
 | DD-03 | Discrete geometric docking instead of PID            | Eliminates gain-tuning; state machine is more debuggable.   |
 | DD-04 | BFS frontier detection (not RRT or information-gain) | Simpler to implement and debug; sufficient for maze.        |
 | DD-05 | Tag blacklisting on dock failure                     | Prevents infinite retry loops on bad-angle detections.      |
-| DD-06 | Custom Dijkstra/A* nav explored as alternative        | Evaluated Nav2-free fallback; ultimately stayed with Nav2.  |
+| DD-06 | External `apriltag_ros` over a team-written detector  | Avoids reinventing calibrated pose estimation; TF integration is free. |
 
 ---
 

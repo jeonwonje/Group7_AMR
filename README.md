@@ -127,14 +127,14 @@ Two-machine distributed ROS 2 system. Compute-heavy navigation and planning run 
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│                        ROS 2 Humble (FastDDS)                             │
+│                       ROS 2 Humble (CycloneDDS)                           │
 │                                                                           │
 │  ┌──────────── Laptop ───────────────┐  ┌────────── RPi 4B ───────────┐  │
 │  │                                   │  │                             │  │
 │  │  Cartographer SLAM                │  │  turtlebot3_bringup         │  │
 │  │         │                         │  │  (OpenCR, LDS-02)           │  │
 │  │         ▼                         │  │                             │  │
-│  │  Nav2 (planner, controller)       │  │  apriltag_detector          │  │
+│  │  Nav2 (planner, controller)       │  │  apriltag_ros (external)    │  │
 │  │         │                         │  │  /camera → TF, /detections  │  │
 │  │         ▼                         │  │                             │  │
 │  │  auto_explore_v2                  │  │  delivery_server            │  │
@@ -147,7 +147,7 @@ Two-machine distributed ROS 2 system. Compute-heavy navigation and planning run 
 │  │  search_stations                  │  │                             │  │
 │  └───────────────────────────────────┘  └─────────────────────────────┘  │
 │                                                                           │
-│          ◄──────── FastDDS unicast over Wi-Fi ────────►                   │
+│          ◄──────── CycloneDDS unicast over Wi-Fi ─────────►               │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -157,9 +157,10 @@ Two-machine distributed ROS 2 system. Compute-heavy navigation and planning run 
  LDS-02 LiDAR         RPi Camera V2
       │                     │
       ▼                     ▼
- Cartographer         apriltag_detector
+ Cartographer         apriltag_ros (external)
       │                     │
       ├──► /map             ├──► TF: camera_link → tag36h11:<id>
+      │                     └──► /detections (AprilTagDetectionArray)
       ▼                     ▼
  find_frontiers       mission_coordinator (TF poll)
       │                     │
@@ -225,16 +226,16 @@ Two-machine distributed ROS 2 system. Compute-heavy navigation and planning run 
 | PATH_BLOCKED_OCC_MIN | 51 | Occupancy threshold for blocked path |
 | PREFLIGHT_TIMEOUT_SEC | 10.0 s | ComputePathToPose timeout |
 
-### 4.2 Perception — `apriltag_detector`
+### 4.2 Perception — `apriltag_ros` (external)
 
-**Owner:** Clara
+**Owner:** Clara (integration)
 
-Subscribes to `/camera/image_raw`, runs `apriltag.Detector(families='tag36h11')` at 10 Hz, computes 6-DOF pose via `cv2.solvePnP`, broadcasts TF transforms `camera_link → tag36h11:<id>`.
+AprilTag detection is delegated to the upstream [`apriltag_ros`](https://github.com/christianrauch/apriltag_ros) ROS 2 package running on the RPi. It subscribes to `/camera/image_raw` + `/camera/camera_info`, detects `tag36h11` markers, publishes detections on `/detections` (`apriltag_msgs/AprilTagDetectionArray`), and broadcasts TF transforms `camera_link → tag36h11:<id>`. No team-written detection node exists.
 
 | Parameter | Value | Description |
 |---|---|---|
-| marker_size | 0.16 m | Tag physical side length |
-| detection_rate | 10.0 Hz | Processing throttle |
+| family | tag36h11 | AprilTag family used for all station markers |
+| Target tag IDs | 0, 2, 3 | 0 = static station, 2 = dynamic dock, 3 = dynamic target |
 
 ### 4.3 Docking — `docker.py`
 
@@ -293,10 +294,10 @@ When exploration is complete but tags remain, navigates to pre-computed zones, p
 | `/map` | OccupancyGrid | Cartographer | find_frontiers, search_stations |
 | `/scan` | LaserScan | LDS-02 driver | Cartographer |
 | `/cmd_vel` | Twist | Nav2 / docking / search | OpenCR |
-| `/camera/image_raw` | Image | RPi camera | apriltag_detector |
+| `/camera/image_raw` | Image | v4l2_camera (RPi) | apriltag_ros |
 | `/mission_command` | String (JSON) | mission_coordinator | docker, delivery, search |
-| `/mission_status` | String (JSON) | docker, delivery, search, explorer | mission_coordinator |
-| `/detections` | AprilTagDetectionArray | apriltag (RPi) | delivery_server |
+| `/mission_status` | String (JSON) | docker, deliverer, searcher, score_and_post | mission_coordinator |
+| `/detections` | AprilTagDetectionArray | apriltag_ros (RPi) | delivery_server |
 | `/goal_pose` | PoseStamped | score_and_post | Nav2 |
 | `frontiers` | String (JSON) | find_frontiers | score_and_post |
 
@@ -349,9 +350,10 @@ map → odom → base_footprint → base_link → base_scan (LiDAR)
 
 | Parameter | Value |
 |---|---|
-| DDS | FastDDS, unicast (no multicast) |
-| ROS_DOMAIN_ID | 30 |
-| Time sync | Manual ~0.40 s offset; stale TF threshold absorbs drift |
+| DDS (real robot) | CycloneDDS, unicast peers via `CYCLONEDDS_URI` XML |
+| DDS (Gazebo sim on WSL2) | FastRTPS (`rmw_fastrtps_cpp`) — CycloneDDS workaround |
+| ROS_DOMAIN_ID | Gazebo forces `0`; real robot per operator env |
+| Time sync | Manual ~0.40 s offset (RPi ahead); stale TF threshold (0.5 s) absorbs drift |
 
 ---
 
@@ -365,7 +367,7 @@ map → odom → base_footprint → base_link → base_scan (LiDAR)
 | ROS | Humble Hawksbill |
 | Python | 3.10 |
 | Build | colcon + ament_python |
-| DDS | FastDDS via `rmw_fastrtps_cpp` |
+| DDS | CycloneDDS (`rmw_cyclonedds_cpp`); FastRTPS used as Gazebo-on-WSL2 fallback |
 | Linter | flake8, pep257 |
 
 ### Repository Layout
@@ -449,9 +451,9 @@ ros2 launch CDE2310_AMR_Trial_Run gazebo_mission.launch.py
 
 ### Dependencies
 
-**ROS 2:** rclpy, std_msgs, std_srvs, geometry_msgs, nav_msgs, sensor_msgs, nav2_msgs, tf2_ros, cv_bridge, cartographer_ros, nav2_bringup, turtlebot3_bringup
+**ROS 2:** rclpy, std_msgs, std_srvs, geometry_msgs, nav_msgs, sensor_msgs, nav2_msgs, tf2_ros, cartographer_ros, nav2_bringup, turtlebot3_bringup, apriltag_ros (external, RPi side)
 
-**Python:** numpy, opencv-python, apriltag, pytest
+**Python:** numpy, pytest, RPi.GPIO (RPi only, for `delivery_server_consolidated`)
 
 ---
 
@@ -554,7 +556,7 @@ colcon test-result --verbose
 |---|---|
 | Robot doesn't move | Check OpenCR power; reseat USB RPi ↔ OpenCR |
 | No frontiers found | Map fully explored or SLAM not running |
-| AprilTag not detected | Check camera CSI cable; verify apriltag node running |
+| AprilTag not detected | Check camera CSI cable; verify `apriltag_ros` node running on RPi |
 | Docking aborts | Check lighting; increase blacklist_timeout |
 | Launcher jams | Clear barrel; check gear alignment; sand barrel interior |
 | Servo not firing | Verify GPIO 12 connection; test with `raspi-gpio` |
@@ -572,10 +574,10 @@ colcon test-result --verbose
 
 | Member | Role | Branch |
 |---|---|---|
-| Jeon Won Je | Systems lead, delivery server, manufacturing | `dev/jeon` |
-| Clara Ong | Navigation, launcher, perception | `dev/clara` |
-| Kumaresan | Navigation, mission coordination | `dev/kumaresan` |
-| Shashwat Gupta | Docking, launcher mechanism | `dev/shashwat` |
+| Jeon Won Je | Systems lead, manufacturing, delivery server | `dev/jeon` |
+| Clara Ong | Perception integration (apriltag_ros), launcher hardware | `dev/clara` |
+| Kumaresan | Navigation, exploration, mission coordination | `dev/kumaresan` |
+| Shashwat Gupta | Docking server, launcher mechanism | `dev/shashwat` |
 | Daniel Yow | Mechanical subsystems, CAD | `dev/daniel` |
 
 ---

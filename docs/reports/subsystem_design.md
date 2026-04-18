@@ -75,46 +75,56 @@ pauses/resumes exploration during docking/delivery.
 ---
 
 *Note: A custom Nav2-free navigation package (`amr_nav`) was explored during
-development but ultimately removed in favour of the Nav2-based stack. The
-Dijkstra/A* algorithms and 29 unit tests are preserved in git history.*
+development but ultimately removed in favour of the Nav2-based stack (see
+CHANGELOG 1.1.0). Its Dijkstra/A* algorithms and earlier pathfinding unit tests
+are recoverable from git history (commit `044e346`).*
 
 ---
 
-### 2.2  Perception Subsystem — `CDE2310_AMR_Trial_Run/apriltag_detector`
+### 2.2  Perception Subsystem — External `apriltag_ros`
 
-**Owner:** Clara
+**Owner:** Clara (integration, calibration, configuration)
 
-**Purpose:** Detect tag36h11 AprilTag markers in the camera feed, compute
-6-DOF poses, and broadcast transforms to the TF tree.
+**Purpose:** Detect tag36h11 AprilTag markers in the RPi camera feed, compute
+6-DOF poses, and broadcast the resulting transforms to the TF tree so that
+mission, docking, and delivery nodes can react to tag geometry.
 
-**Node:** `apriltag_detector` (apriltag_detector.py)
+**Provenance:** The team does **not** ship a bespoke `apriltag_detector` node.
+Detection and pose estimation are provided by the upstream
+[`apriltag_ros`](https://github.com/christianrauch/apriltag_ros) ROS 2 package,
+launched on the RPi alongside the camera driver. The team's contribution to
+perception is limited to: (a) calibrating the RPi Camera V2 intrinsics,
+(b) configuring the detector's tag family and size, and (c) wiring its output
+into the mission stack.
 
-**Algorithm:**
+**Pipeline:**
 
-1. Subscribe to `/camera/image_raw` (Image).
-2. Convert to greyscale via `cv_bridge`.
-3. Run `apriltag.Detector(families='tag36h11')` on the frame.
-4. For each detection:
-   a. Construct 3D object points from `marker_size` (0.16 m).
-   b. Run `cv2.solvePnP` with camera intrinsics to get rotation + translation.
-   c. Convert rotation vector → quaternion.
-   d. Broadcast TF: `camera_link → tag36h11:<id>`.
-5. Publish detection summary on `/marker_detection` (String, JSON).
-6. Publish annotated debug image on `/apriltag_debug_image`.
-7. Throttle to `detection_rate` (10 Hz) to avoid overloading the RPi.
+1. The RPi camera driver publishes `/camera/image_raw` (Image) and
+   `/camera/camera_info` (CameraInfo).
+2. `apriltag_ros` subscribes to both, runs tag36h11 detection, and solves
+   each tag's 6-DOF pose using the calibrated intrinsics.
+3. It publishes:
+   - `/detections` (`apriltag_msgs/AprilTagDetectionArray`) — full per-tag
+     detection payload.
+   - TF frames `camera_link → tag36h11:<id>` for each visible tag.
+4. Downstream consumers:
+   - `docker` reads tag TF frames to compute lateral/yaw error for servoing.
+   - `delivery_server` subscribes to `/detections` for dynamic-station
+     crosshair logic against tag36h11:3.
+   - `mission_coordinator` monitors the TF tree with a 0.5 s staleness
+     threshold before acting on a tag.
 
-**Parameters:**
+**Configuration:**
 
-| Parameter       | Default | Unit  | Description                         |
-|-----------------|---------|-------|-------------------------------------|
-| marker_size     | 0.16    | m     | Physical side length of the tag     |
-| detection_rate  | 10.0    | Hz    | Processing throttle                 |
-| fx, fy          | 620.0   | px    | Focal lengths (default, overridden by /camera_info) |
-| cx, cy          | 320/240 | px    | Principal point                     |
-| dist_coeffs     | [0…0]   | —     | Distortion coefficients             |
+| Parameter              | Value        | Description                                         |
+|------------------------|--------------|-----------------------------------------------------|
+| Tag family             | tag36h11     | Per mission brief.                                  |
+| Tag size               | 0.16 m       | Physical side length; must match `apriltag_ros` YAML.|
+| Camera intrinsics      | Calibrated   | Produced via `camera_calibration`; loaded by driver.|
+| Target tag IDs         | 0, 2, 3      | Static station, dynamic station, moving target.     |
 
-**Calibration override:** If `/camera/camera_info` is published, the node
-replaces the default intrinsics with calibrated values on first receipt.
+**Robustness:** Mission-side consumers guard against stale detections with a
+0.5 s TF age limit and, for docking, a 1.0 s camera-dropout coast window.
 
 ---
 
@@ -162,7 +172,7 @@ state machine:
 |------------------------|--------|-------|----------------------------------------|
 | staging_distance       | 0.40   | m     | Nav2 drop-off distance from tag        |
 | stop_distance          | 0.10   | m     | Final approach stop from tag           |
-| intercept_ratio        | 0.6    | —     | Dynamic lookahead fraction             |
+| intercept_ratio        | 0.7    | —     | Dynamic lookahead fraction             |
 | abort_ratio            | 0.3    | —     | Hard safety boundary fraction          |
 | intercept_y_tolerance  | 0.03   | m     | Centreline alignment tolerance         |
 | square_yaw_tolerance   | 0.05   | rad   | Yaw alignment tolerance                |
@@ -284,7 +294,7 @@ to pre-computed zones and spin to scan for the missing tag.
 
 | Parameter              | Value     | Unit  | Description                    |
 |------------------------|-----------|-------|--------------------------------|
-| relative_search_offsets| [(0.3,0.7),(1.1,1.7)] | m | Offsets from start pose |
+| relative_search_offsets| [(-0.75,-0.3),(1.25,2.7)] | m | Offsets from start pose |
 | max_safe_search_radius | 1.5       | m     | Max snap distance for free cell|
 | spin_velocity          | 0.5       | rad/s | Rotation speed for scan        |
 | spin_duration          | 13.0      | s     | Duration (covers > 360°)       |
