@@ -1,0 +1,68 @@
+' Shared skinparams — Group 7 house style (extracted from software_uml_diagram.svg).
+' Include in each diagram with:  !include _style.iuml
+' The Smetana layout engine is set per-diagram because it must appear after @startuml.
+
+skinparam backgroundColor white
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam roundCorner 20
+skinparam padding 18
+
+' Arrows
+skinparam arrowColor #2C3E50
+skinparam arrowThickness 3
+skinparam arrowFontSize 24
+skinparam arrowFontColor #34495E
+
+' Activity (activity diagrams)
+skinparam activity {
+  BackgroundColor #AED6F1
+  BorderColor     #2E86C1
+  BorderThickness 3
+  FontSize        28
+  FontStyle       bold
+  DiamondBackgroundColor #D5F5E3
+  DiamondBorderColor     #27AE60
+  DiamondFontSize 26
+  BarColor        #2C3E50
+}
+
+' Notes
+skinparam note {
+  BackgroundColor #FDEBD0
+  BorderColor     #D68910
+  FontSize        20
+}
+
+' Components / nodes (for component diagrams)
+skinparam component {
+  BackgroundColor #AED6F1
+  BorderColor     #2E86C1
+  BorderThickness 2
+  FontSize        14
+  FontStyle       bold
+}
+skinparam node {
+  BackgroundColor #F7F7F7
+  BorderColor     #2C3E50
+  BorderThickness 2
+  FontSize        14
+  FontStyle       bold
+}
+
+' State machines (for state diagrams)
+skinparam state {
+  BackgroundColor #AED6F1
+  BorderColor     #2E86C1
+  BorderThickness 3
+  FontSize        18
+  FontStyle       bold
+  StartColor      #2C3E50
+  EndColor        #C0392B
+}
+
+skinparam title {
+  FontSize        22
+  FontStyle       bold
+  FontColor       #000000
+}
