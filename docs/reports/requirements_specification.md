@@ -56,14 +56,14 @@ a custom spring-loaded launcher payload.
 | FR-EXP-02 | The AMR shall detect frontier cells (boundary between explored free space and unknown space) via BFS flood-fill. | ConOps §5.3 |
 | FR-EXP-03 | The AMR shall cluster frontiers and score them by a weighted combination of BFS distance and cluster size. | ConOps §5.3 |
 | FR-EXP-04 | The AMR shall autonomously navigate to the highest-scored frontier goal until no frontiers remain. | ConOps §5.3 |
-| FR-EXP-05 | The AMR shall report EXPLORATION_COMPLETE when all reachable frontiers have been visited. | ConOps §5.3 |
+| FR-EXP-05 | The mission coordinator shall transition EXPLORING → SEARCHING when the `initial_exploration_timeout` (480 s) expires while un-serviced target tags remain. | ConOps §5.3 |
 
 ### 4.2  Detection
 
 | ID       | Requirement                                                                 | Traces to |
 |----------|-----------------------------------------------------------------------------|-----------|
-| FR-DET-01 | The AMR shall detect tag36h11 AprilTag markers using an on-board RPi Camera V2 and the external `apriltag_ros` ROS 2 package. | ConOps §5.4 |
-| FR-DET-02 | The `apriltag_ros` package shall compute the 6-DOF pose of each detected marker and publish it as a TF transform plus an `AprilTagDetectionArray` on `/detections`. | ConOps §5.4 |
+| FR-DET-01 | The AMR shall detect tag36h11 AprilTag markers via the `apriltag_docking` composable vision pipeline (camera → resize → rectify → detect) running on the RPi Camera V2. | ConOps §5.4 |
+| FR-DET-02 | The `apriltag_docking` package shall compute and publish the 6-DOF pose of each detected marker as TF frames (`camera → tag36h11:{0,2}`) and as `geometry_msgs/PoseStamped` on `/detected_dock_pose_{0,2}` for Nav2-consumable docking servoing, plus an `AprilTagDetectionArray` on `/detections`. | ConOps §5.4 |
 | FR-DET-03 | The mission coordinator shall monitor the TF tree for target tags (`tag36h11:0`, `tag36h11:2`) with a staleness threshold of 0.5 s. | ConOps §5.4 |
 
 ### 4.3  Docking
@@ -103,7 +103,7 @@ a custom spring-loaded launcher payload.
 | NFR-04   | Accuracy    | Docking yaw error shall be ≤ 0.05 rad (≈ 3°) at final stop.      |
 | NFR-05   | Reliability | The system shall tolerate camera dropout for up to 1.0 s during docking without aborting. |
 | NFR-06   | Reliability | The system shall handle Nav2 goal rejection by applying a fallback staging offset (−0.15 m). |
-| NFR-07   | Power       | The RPi and launcher shall operate from the TurtleBot3 11.1 V LiPo battery via buck converter for the full mission duration. |
+| NFR-07   | Power       | The RPi and launcher shall operate from the TurtleBot3 11.1 V LiPo battery via the OpenCR 5 V regulator for the full mission duration. |
 | NFR-08   | Comms       | DDS discovery between RPi and laptop shall use CycloneDDS with unicast peers (no multicast). FastRTPS is used only as a Gazebo/WSL2 fallback (issue #19). |
 
 ---

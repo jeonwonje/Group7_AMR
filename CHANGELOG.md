@@ -11,10 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Gazebo simulation support: maze world, AprilTag models, full-mission sim launch (`gazebo_mission.launch.py`).
 - `nav_tuner.launch.py` and `slam_test.launch.py` for isolated Nav2 and SLAM tuning.
 - Mechanical hardware documentation completed in `hardware/README.md`.
+- `apriltag_docking` ROS 2 package (`src/apriltag_docking/`): custom RPi-side perception pipeline composing `camera_ros`, `image_proc` (resize + rectify), and `apriltag_ros` into a zero-copy container, plus per-station static dock-target TF frames and `detected_dock_pose_publisher` nodes that publish `/detected_dock_pose_{0,2}` (PoseStamped) consumed by the Nav2 docker.
+- `docs/MANUFACTURING.md`: operator-facing Bambu Lab P2S `.3mf` print workflow for reproducing the team's 3D-printed parts (default Bambu Studio preset + tree supports), linked from the slim README and complementing Daniel's `hardware/README.md`.
 
 ### Changed
 - Nav2 global planner switched to Dijkstra; global and local costmap inflation radii split and retuned for tight corridors.
-- Documentation rewritten against the actual codebase: removed references to non-existent nodes (`apriltag_detector`, `launcher_node`, `rpi_shooter_node`, `static_station`, `auto_nav`). AprilTag detection is provided by the external `apriltag_ros` package — not a team-written node.
+- Documentation rewritten against the actual codebase: removed references to non-existent nodes (`apriltag_detector`, `launcher_node`, `rpi_shooter_node`, `static_station`, `auto_nav`). AprilTag detection now lives in the team-authored `apriltag_docking` package, which wraps the upstream `apriltag_ros` detector.
+- `README.md` reduced from ~585 lines to a ~70-line doc index pointing at the split SDD under `docs/reports/`; all intra-README anchor links dropped.
+- End User Documentation rewritten for the printed 5-page Final Mission hand-in: corrects platform (Burger, not Waffle Pi), actuator (XL430-W210), ball capacity (7, not 3), docking distances (staging 0.40 m / stop 0.10 m), and deployment flow (2 terminals, not 7). §3 Acceptable Defect Log and §5 Maintenance & Part Replacement Log populated.
+- Subsystem Design §4.3 Docking expanded from a 3-phase description to the real 8-state FSM in `docker.py` (IDLE → NAV_TO_STAGING → COMPUTE_GEOMETRY → INTERCEPT → SQUARE_UP → EVALUATE_POSITION → RETRY_BACKUP → FINAL_PLUNGE → UNDOCKING).
+- Mission FSM diagrams: removed phantom "map exhausted" branch. Documented the real transitions — exploration-timeout to SEARCH (480 s default), master-timeout to MISSION_TIMED_OUT (1200 s), all-stations-serviced to MISSION_COMPLETE. `EXPLORATION_COMPLETE` / `"explorer"` status values in the ICD are now annotated as dangling contracts (never emitted by any node).
+- Hardware-Software Mapping: removed non-existent buck converter; RPi is powered directly by the OpenCR 5 V regulator (NFR-07, ICD GND row, HLD Layer-1 diagram).
+- Tag edge length corrected from 0.16 m to 0.0986 m across all reports (per `apriltag_docking/config/apriltags_36h11.yaml`).
+- ICD TF tree redrawn with the real `camera_link → camera → tag36h11:{0,2} → nav2_dock_target_{0,2}` chain; bogus `tag36h11:3` TF branch removed (tag 3 is inspected via `/detections` only, never broadcast as a frame).
+- ICD topic table: added `/detected_dock_pose_{0,2}`, `/camera/resized/{image_raw,camera_info,image_rect}`, and `/camera/camera_info`; corrected publisher for `/detections`. ICD services: added `clear_blacklist` (std_srvs/Empty, score_and_post → mission_coordinator).
+- Testing §3 Unit & Lint Tests consolidated and honest: unit coverage is limited to ament lint scaffolds; pathfinding / frontier-scoring / docking-geometry suites flagged as planned-but-unimplemented (TST-UT-01…29 phantom rows removed).
+- Software Development §Dependencies split into Team Packages and Upstream Deps, reflecting `apriltag_docking` as team-authored with the full upstream list pulled from its `package.xml`. AI-attribution section bumped to Claude Opus 4.7.
+- Subsystem Design §2.6 Search: `max_safe_search_radius` doc-code mismatch fixed (0.6 m per `search_stations.py:35`, previously documented as 1.5 m).
 
 ### Fixed
 - Reverted a Gazebo-only tuning of `minimal_nav2.yaml` that had degraded real-robot behaviour.

@@ -59,7 +59,10 @@ to the most promising frontier.
    If the path is blocked (occupancy ≥ 51), discard and try the next candidate.
 4. Post the winning goal to Nav2 via `NavigateToPose` action.
 5. On completion or timeout, re-score and repeat.
-6. When no clusters remain, publish `EXPLORATION_COMPLETE` on `/mission_status`.
+6. When all frontiers fall below the scoring floor, publish an
+   `EXPLORATION_COMPLETE` status (not currently emitted by the implementation
+   — see §2.5 "Known gap"; the mission FSM relies on the exploration timeout
+   instead).
 
 **Toggle service:** `toggle_exploration` (SetBool) — the mission coordinator
 pauses/resumes exploration during docking/delivery.
@@ -81,47 +84,60 @@ are recoverable from git history (commit `044e346`).*
 
 ---
 
-### 2.2  Perception Subsystem — External `apriltag_ros`
+### 2.2  Perception Subsystem — `apriltag_docking`
 
 **Owner:** Clara (integration, calibration, configuration)
 
 **Purpose:** Detect tag36h11 AprilTag markers in the RPi camera feed, compute
-6-DOF poses, and broadcast the resulting transforms to the TF tree so that
-mission, docking, and delivery nodes can react to tag geometry.
+6-DOF poses, and broadcast the resulting transforms plus Nav2-consumable
+PoseStamped topics so mission, docking, and delivery nodes can react to tag
+geometry.
 
-**Provenance:** The team does **not** ship a bespoke `apriltag_detector` node.
-Detection and pose estimation are provided by the upstream
-[`apriltag_ros`](https://github.com/christianrauch/apriltag_ros) ROS 2 package,
-launched on the RPi alongside the camera driver. The team's contribution to
-perception is limited to: (a) calibrating the RPi Camera V2 intrinsics,
-(b) configuring the detector's tag family and size, and (c) wiring its output
-into the mission stack.
+**Provenance:** `apriltag_docking` is a team-authored ament_cmake (C++) ROS 2
+package located at `src/apriltag_docking/`. It wraps upstream dependencies
+(`camera_ros`, `image_proc`, `apriltag_ros`) into a single zero-copy
+composable container and adds two bespoke elements: per-station static
+`nav2_dock_target_{id}` frames, and a C++ `detected_dock_pose_publisher` node
+that republishes TF lookups as `geometry_msgs/PoseStamped` at 10 Hz for Nav2
+consumption. The `detected_dock_pose_publisher.cpp` node is adapted from
+Addison Sears-Collins' Dec 2024 tutorial (attribution preserved in source).
 
-**Pipeline:**
+**Pipeline (single composable container `apriltag_vision_container`, intra-process comms):**
 
-1. The RPi camera driver publishes `/camera/image_raw` (Image) and
-   `/camera/camera_info` (CameraInfo).
-2. `apriltag_ros` subscribes to both, runs tag36h11 detection, and solves
-   each tag's 6-DOF pose using the calibrated intrinsics.
-3. It publishes:
-   - `/detections` (`apriltag_msgs/AprilTagDetectionArray`) — full per-tag
-     detection payload.
-   - TF frames `camera_link → tag36h11:<id>` for each visible tag.
-4. Downstream consumers:
-   - `docker` reads tag TF frames to compute lateral/yaw error for servoing.
-   - `delivery_server` subscribes to `/detections` for dynamic-station
-     crosshair logic against tag36h11:3.
-   - `mission_coordinator` monitors the TF tree with a 0.5 s staleness
-     threshold before acting on a tag.
+![Figure 4 — Perception Pipeline](../diagrams/out/04-ssd-perception-pipeline.png)
 
-**Configuration:**
+*Figure 4 — `apriltag_docking` zero-copy composable container on the RPi. Source: [`../diagrams/04-ssd-perception-pipeline.puml`](../diagrams/04-ssd-perception-pipeline.puml).*
 
-| Parameter              | Value        | Description                                         |
-|------------------------|--------------|-----------------------------------------------------|
-| Tag family             | tag36h11     | Per mission brief.                                  |
-| Tag size               | 0.16 m       | Physical side length; must match `apriltag_ros` YAML.|
-| Camera intrinsics      | Calibrated   | Produced via `camera_calibration`; loaded by driver.|
-| Target tag IDs         | 0, 2, 3      | Static station, dynamic station, moving target.     |
+Standalone TF bridges launched alongside the container:
+- `base_link → camera_link` (static, x=0.09, y=0.05, z=0.097).
+- `camera_link → camera` (static optical rotation, yaw=-π/2, roll=-π/2).
+
+**Downstream consumers:**
+- `docker.py` subscribes to `/detected_dock_pose_{0,2}` for geometric servoing.
+- `delivery_server_consolidated.py` subscribes to `/detections` for Station B
+  reactive fires against tag36h11 ID 3.
+- `mission_coordinator_v3.py` monitors the TF tree (`camera → tag36h11:{0,2}`)
+  with a 0.5 s staleness threshold before acting on a tag.
+
+**Configuration** (`src/apriltag_docking/config/apriltags_36h11.yaml`):
+
+| Parameter              | Value        | Description                                          |
+|------------------------|--------------|------------------------------------------------------|
+| Tag family             | tag36h11     | Per mission brief.                                   |
+| Tag size               | 0.0986 m     | Physical side length (as measured on the printed tag).|
+| decimate               | 2.0          | Detector down-sample factor.                         |
+| threads                | 1            | Detector worker threads (single-threaded on RPi).    |
+| refine                 | true         | Edge refinement enabled.                             |
+| max_hamming            | 0            | No Hamming-bit correction (strict IDs).              |
+| Camera intrinsics      | Calibrated   | Produced via `camera_calibration`; loaded by `camera_ros`. |
+| Broadcast tag IDs      | 0, 2         | Static and dynamic docking stations (TF frames).     |
+| Detection-only tag ID  | 3            | Moving target on Station B rail; present in `/detections` only — no TF frame is broadcast. |
+
+**Innovation vs vanilla `apriltag_ros`:** the fused composable pipeline
+(resize → rectify → detect with zero-copy intra-process transport), the
+per-station `nav2_dock_target_{id}` frames that encode the dock approach
+geometry, and the C++ `detected_dock_pose_publisher` that converts TF lookups
+into Nav2-consumable `PoseStamped` topics.
 
 **Robustness:** Mission-side consumers guard against stale detections with a
 0.5 s TF age limit and, for docking, a 1.0 s camera-dropout coast window.
@@ -139,32 +155,14 @@ using discrete geometric visual servoing.
 
 **Algorithm — Geometric Visual Servoing:**
 
-The docking server replaces continuous PID control with a 3-phase discrete
-state machine:
+The docking server replaces continuous PID control with an 8-state discrete
+state machine. The input signal is `/detected_dock_pose_{0,2}` (PoseStamped
+in the camera optical frame, published at 10 Hz by `apriltag_docking`); the
+output is `/cmd_vel` twists plus one Nav2 `NavigateToPose` call per dock.
 
-```
-  Nav2 staging goal (0.40 m from tag)
-         │
-         ▼
-  ┌──────────────────┐
-  │  INTERCEPT        │  Drive at a slant to reduce lateral (Y) error.
-  │                   │  Y tolerance: 0.03 m
-  │  Abort boundary:  │  If X < abort_ratio × staging → backup
-  └────────┬──────────┘
-           │ Y error ≤ tolerance
-  ┌────────▼──────────┐
-  │  SQUARE_UP         │  Rotate in place to align yaw with tag normal.
-  │                   │  Yaw tolerance: 0.05 rad (≈ 3°)
-  └────────┬──────────┘
-           │ yaw aligned
-  ┌────────▼──────────┐
-  │  FINAL_PLUNGE      │  Drive straight until stop_distance (0.10 m).
-  │                   │  If Y > max_allowed_y_error → backup + retry
-  └────────┬──────────┘
-           │
-           ▼
-  DOCKING_COMPLETE / DOCKING_FAILED
-```
+![Figure 5 — Docking FSM](../diagrams/out/05-ssd-docking-fsm.png)
+
+*Figure 5 — `docker.py` 8-state geometric visual-servoing FSM. Source: [`../diagrams/05-ssd-docking-fsm.puml`](../diagrams/05-ssd-docking-fsm.puml).*
 
 **Parameters:**
 
@@ -183,11 +181,14 @@ state machine:
 | fallback_staging_offset| 0.15   | m     | Subtracted on Nav2 rejection retry     |
 
 **Robustness:**
-- Camera dropout: coast on last-known TF for up to `sensor_drop_tolerance` (1 s).
-- Nav2 rejection: subtract `fallback_staging_offset` (0.15 m) and retry once.
-- Timeout: abort after `max_docking_time` (180 s).
-- Backup: if Y error too large at plunge phase, reverse at `backup_speed` for
-  `backup_duration`, then retry (up to `max_retries`).
+- Camera dropout: coast on last-known `/detected_dock_pose_N` for up to
+  `sensor_drop_tolerance` (1 s).
+- Nav2 rejection: subtract `fallback_staging_offset` (0.15 m) and retry once;
+  second rejection aborts with DOCKING_FAILED.
+- Timeout: abort after `max_docking_time` (180 s) regardless of state.
+- Backup: if Y error too large at `EVALUATE_POSITION`, reverse at
+  `backup_speed` for `backup_duration`, then return to `COMPUTE_GEOMETRY`
+  (up to `max_retries` = 3).
 
 ---
 
@@ -240,34 +241,32 @@ mission lifecycle.
 
 **State Machine:**
 
-```
-  INIT ──► EXPLORING ──tag seen──► DOCKING ──success──► DELIVERING
-               ▲                      │                      │
-               │                      │ fail (blacklist)     │
-               │                      ▼                      ▼
-               └──── resume ◄──── EXPLORING              UNDOCKING
-               │                                             │
-               └──── resume ◄────────────────────────────────┘
-               │
-               ▼ (exploration complete, tags remain)
-           SEARCHING ──tag seen──► DOCKING ──► ...
-               │
-               ▼ (all zones exhausted)
-           MISSION_COMPLETE
-```
+![Figure 6 — Mission Coordination FSM](../diagrams/out/06-ssd-mission-fsm.png)
+
+*Figure 6 — `mission_coordinator_v3` state machine. Source: [`../diagrams/06-ssd-mission-fsm.puml`](../diagrams/06-ssd-mission-fsm.puml).*
 
 **Key Mechanisms:**
 
 | Mechanism             | Implementation                                          |
 |-----------------------|---------------------------------------------------------|
-| Tag monitoring        | Poll TF tree at 10 Hz for target tags                   |
-| Staleness filtering   | Reject TF transforms older than 0.5 s                  |
+| Tag monitoring        | Poll TF tree at 10 Hz for target tags (`tag36h11:0`, `tag36h11:2`) |
+| Staleness filtering   | Reject TF transforms older than `stale_tf_threshold` (0.5 s) |
 | Blacklisting          | HashMap `{tag: expiry_time}`, 30 s duration             |
-| Exploration toggle    | SetBool service call to `toggle_exploration`            |
+| Clear blacklist       | `clear_blacklist` (std_srvs/Empty) client call to `score_and_post`, invoked on exploration resume so previously penalised frontiers become eligible again |
+| Exploration toggle    | `toggle_exploration` (std_srvs/SetBool) service call to `score_and_post` |
 | Command dispatch      | JSON on `/mission_command` topic                        |
 | Status listening      | JSON on `/mission_status` topic                         |
+| Exploration timeout   | `initial_exploration_timeout` (480 s) sets `timeout_search_active = True` and transitions EXPLORING → SEARCHING while un-serviced tags remain |
+| Master timeout        | `master_mission_timeout` (1200 s) hard-aborts to terminal `MISSION_TIMED_OUT` |
+| Delivery timeout      | `delivery_timeout` (90 s) caps time spent in DELIVERING |
 | Search fallback       | Dispatches `START_SEARCH` with docked tag list          |
 | Completion detection  | `docked_tags == target_tags` → MISSION_COMPLETE         |
+
+**Known gap:** `self.exploration_completed` is declared in the coordinator
+but never set to `True` in the current implementation, and no node emits
+`EXPLORATION_COMPLETE` on `/mission_status`. The SEARCHING phase is therefore
+only reachable via the exploration timeout above. FR-EXP-05 is reworded
+against the timeout behaviour in the requirements document to reflect this.
 
 ---
 
@@ -284,7 +283,8 @@ to pre-computed zones and spin to scan for the missing tag.
    anchored to the robot's start position.
 2. For each zone:
    a. Snap the zone coordinate to the nearest free cell on the occupancy grid
-      (within `max_safe_search_radius` = 1.5 m).
+      (within `max_safe_search_radius` = 0.6 m; reduced from 1.5 m to
+      avoid snapping into far-away free space during mid-arena recovery).
    b. Navigate to the safe cell via Nav2 `NavigateToPose`.
    c. On arrival (within `arrival_tolerance` = 0.4 m), spin 360° (0.5 rad/s × 13 s).
    d. If a tag interrupt occurs during spin, abort search.
@@ -295,7 +295,7 @@ to pre-computed zones and spin to scan for the missing tag.
 | Parameter              | Value     | Unit  | Description                    |
 |------------------------|-----------|-------|--------------------------------|
 | relative_search_offsets| [(-0.75,-0.3),(1.25,2.7)] | m | Offsets from start pose |
-| max_safe_search_radius | 1.5       | m     | Max snap distance for free cell|
+| max_safe_search_radius | 0.6       | m     | Max snap distance for free cell|
 | spin_velocity          | 0.5       | rad/s | Rotation speed for scan        |
 | spin_duration          | 13.0      | s     | Duration (covers > 360°)       |
 | max_nav_retries        | 3         | —     | Nav2 retry limit per zone      |

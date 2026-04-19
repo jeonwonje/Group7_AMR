@@ -25,51 +25,9 @@ The system follows a **two-machine distributed ROS 2** architecture. Compute-
 heavy navigation and planning run on a laptop, while hardware-coupled perception
 and actuation run on the Raspberry Pi mounted to the robot.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         ROS 2 Humble (CycloneDDS)                           │
-│                                                                             │
-│  ┌──────────── Laptop ─────────────────┐  ┌────────── RPi 4B ───────────┐  │
-│  │                                     │  │                             │  │
-│  │  ┌─────────────────────────┐        │  │  ┌───────────────────────┐  │  │
-│  │  │   Cartographer SLAM     │        │  │  │  turtlebot3_bringup   │  │  │
-│  │  │   /map, /tf             │        │  │  │  (OpenCR, LDS-02)     │  │  │
-│  │  └────────────┬────────────┘        │  │  └───────────────────────┘  │  │
-│  │               │                     │  │                             │  │
-│  │  ┌────────────▼────────────┐        │  │  ┌───────────────────────┐  │  │
-│  │  │   Nav2 stack            │        │  │  │  apriltag_ros (ext.)  │  │  │
-│  │  │   (planner, controller) │        │  │  │  /camera → TF,/detect.│  │  │
-│  │  └────────────┬────────────┘        │  │  └───────────────────────┘  │  │
-│  │               │                     │  │                             │  │
-│  │  ┌────────────▼────────────┐        │  │  ┌───────────────────────┐  │  │
-│  │  │   auto_explore_v2       │        │  │  │  delivery_server      │  │  │
-│  │  │   (frontiers → goals)   │        │  │  │  (shot orchestration) │  │  │
-│  │  └────────────┬────────────┘        │  │  └───────────────────────┘  │  │
-│  │               │                     │  │                             │  │
-│  │  ┌────────────▼────────────┐        │  │                             │  │
-│  │  │   mission_coordinator   │        │  │                             │  │
-│  │  │   (central FSM)         │        │  │                             │  │
-│  │  └─────────────────────────┘        │  │                             │  │
-│  │                                     │  │                             │  │
-│  │  ┌─────────────────────────┐        │  │                             │  │
-│  │  │   docking_server        │        │  │                             │  │
-│  │  │   (visual servoing)     │        │  │                             │  │
-│  │  └─────────────────────────┘        │  │                             │  │
-│  │                                     │  │                             │  │
-│  │  ┌─────────────────────────┐        │  │                             │  │
-│  │  │   search_stations       │        │  │                             │  │
-│  │  │   (zone sweep + spin)   │        │  │                             │  │
-│  │  └─────────────────────────┘        │  │                             │  │
-│  │                                     │  │                             │  │
-│  │  ┌─────────────────────────┐        │  │                             │  │
-│  │  │   RViz2                 │        │  │                             │  │
-│  │  │   (visualisation)       │        │  │                             │  │
-│  │  └─────────────────────────┘        │  │                             │  │
-│  └─────────────────────────────────────┘  └─────────────────────────────┘  │
-│                                                                             │
-│          ◄─────── CycloneDDS unicast over Wi-Fi ───────►                    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+![Figure 1 — Architectural Overview](../diagrams/out/01-hld-architectural-overview.png)
+
+*Figure 1 — Two-machine ROS 2 Humble architecture over CycloneDDS. Source: [`../diagrams/01-hld-architectural-overview.puml`](../diagrams/01-hld-architectural-overview.puml).*
 
 ---
 
@@ -103,29 +61,9 @@ src/
 
 ### 4.1  Primary Data Flow (Exploration → Detection → Delivery)
 
-```
- LDS-02 LiDAR         RPi Camera V2
-      │                     │
-      ▼                     ▼
- /scan topic          /camera/image_raw
-      │                     │
-      ▼                     ▼
- Cartographer         apriltag_ros (ext.)
-      │                     │
-      ├──► /map             ├──► TF: camera_link → tag36h11:<id>
-      │                     │
-      ▼                     ▼
- find_frontiers       mission_coordinator (TF poll)
-      │                     │
-      ▼                     │ tag seen → interrupt
- score_and_post             │
-      │                     ▼
-      ▼                docking_server
- Nav2 NavigateToPose        │
-      │                     ▼
-      ▼                delivery_server (GPIO 12 → MG90 Servo → Ball)
- /cmd_vel → OpenCR
-```
+![Figure 2 — Primary Data Flow](../diagrams/out/02-hld-data-flow.png)
+
+*Figure 2 — Exploration, detection and delivery data chain across the laptop / RPi split. Source: [`../diagrams/02-hld-data-flow.puml`](../diagrams/02-hld-data-flow.puml).*
 
 ### 4.2  Command / Status Bus
 
@@ -156,11 +94,12 @@ All coordination flows through two JSON-encoded String topics:
 | `/map`               | OccupancyGrid        | Cartographer           | find_frontiers, search_stations |
 | `/scan`              | LaserScan            | LDS-02 driver          | Cartographer, Nav2              |
 | `/cmd_vel`           | Twist                | Nav2, docker          | OpenCR (motor driver)           |
-| `/camera/image_raw`  | Image                | RPi camera driver      | apriltag_ros (external)         |
+| `/camera/image_raw`  | Image                | `camera_ros::CameraNode` (RPi)  | `image_proc::ResizeNode` (inside apriltag_docking container) |
 | `/mission_command`   | String (JSON)        | mission_coordinator    | docker, delivery_server, searcher |
 | `/mission_status`    | String (JSON)        | docker, deliverer, searcher, score_and_post | mission_coordinator |
 | `/goal_pose`         | PoseStamped          | score_and_post         | Nav2 planner                    |
-| `/detections`        | AprilTagDetectionArray | apriltag_ros (RPi)   | delivery_server                 |
+| `/detections`        | AprilTagDetectionArray | `apriltag_ros::AprilTagNode` (inside apriltag_docking container, RPi) | delivery_server, mission_coordinator |
+| `/detected_dock_pose_{0,2}` | PoseStamped    | `apriltag_docking::detected_dock_pose_publisher_{0,2}` (RPi) | docker |
 | `frontiers`          | String (JSON)        | find_frontiers         | score_and_post                  |
 
 ### 5.2  ROS 2 Services
@@ -181,34 +120,9 @@ All coordination flows through two JSON-encoded String topics:
 
 ## 6  Hardware-Software Mapping
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        TurtleBot3 Burger                                 │
-│                                                                          │
-│  ┌── Layer 4 (Top) ──────────────────────────────────────────────────┐  │
-│  │  RPi Camera V2 ──CSI──► RPi 4B ──USB──► OpenCR                   │  │
-│  │  MG90 servo ◄──GPIO 12 / PWM── RPi 4B                            │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-│  ┌── Layer 3 ────────────────────────────────────────────────────────┐  │
-│  │  Launcher assembly (spring-loaded plunger, barrel, spur gear)     │  │
-│  │  3D-printed launcher mount v2                                     │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-│  ┌── Layer 2 ────────────────────────────────────────────────────────┐  │
-│  │  OpenCR board  ──► Dynamixel XL430 (L/R wheels)                   │  │
-│  │  LDS-02 LiDAR (360° scan @ 5 Hz)                                 │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-│  ┌── Layer 1 (Base) ─────────────────────────────────────────────────┐  │
-│  │  LiPo battery 11.1 V ──► Buck converter 5 V ──► RPi                │  │
-│  │  Dynamixel motors, caster wheel                                   │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
+![Figure 3 — Hardware-Software Mapping](../diagrams/out/03-hld-hardware-software-mapping.png)
 
-           ◄────── Wi-Fi ──────►  Laptop (Nav2, SLAM, Coordinator, RViz)
-```
+*Figure 3 — TurtleBot3 Burger (MeowthBot) layer stack. Source: [`../diagrams/03-hld-hardware-software-mapping.puml`](../diagrams/03-hld-hardware-software-mapping.puml).*
 
 ---
 
@@ -220,7 +134,7 @@ All coordination flows through two JSON-encoded String topics:
 | Middleware    | ROS 2 Humble + CycloneDDS (FastRTPS for Gazebo/WSL2) |
 | SLAM          | Cartographer (google_cartographer_ros)        |
 | Navigation    | Nav2 (planner, controller, behaviours, BT)    |
-| Perception    | External `apriltag_ros` ROS 2 package         |
+| Perception    | `apriltag_docking` composable container (wraps upstream `apriltag_ros`, `image_proc`, `camera_ros`) |
 | Build system  | colcon + ament_python                         |
 | Language      | Python 3.10                                   |
 | Version ctrl  | Git + GitHub                                  |
@@ -237,7 +151,7 @@ All coordination flows through two JSON-encoded String topics:
 | DD-03 | Discrete geometric docking instead of PID            | Eliminates gain-tuning; state machine is more debuggable.   |
 | DD-04 | BFS frontier detection (not RRT or information-gain) | Simpler to implement and debug; sufficient for maze.        |
 | DD-05 | Tag blacklisting on dock failure                     | Prevents infinite retry loops on bad-angle detections.      |
-| DD-06 | External `apriltag_ros` over a team-written detector  | Avoids reinventing calibrated pose estimation; TF integration is free. |
+| DD-06 | `apriltag_docking` composable pipeline (wrapping upstream `apriltag_ros`) over a team-written Python detector | Zero-copy camera→detect path on the RPi; per-station `nav2_dock_target_{id}` frames + `detected_dock_pose_publisher` give Nav2-consumable PoseStamped without reinventing pose estimation. |
 
 ---
 

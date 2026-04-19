@@ -98,7 +98,7 @@ Requirements are written as unambiguous, singular, verifiable "shall" statements
 | Group 7 Engineering Team | Designers, builders, and operators | Feasibility, integration risk, manageable schedule, clear work division |
 | Jeon Won Je | Systems lead, delivery server, CAD assembly | System-level coherence, reliable delivery logic, clean integration |
 | Kumaresan | Navigation, frontier exploration, mission coordination | Robust autonomous exploration, accurate goal selection |
-| Clara Ong | Perception integration (apriltag_ros), launcher hardware | Reliable AprilTag detection, reactive firing logic |
+| Clara Ong | Perception integration (`apriltag_docking`), launcher hardware | Reliable AprilTag detection, reactive firing logic |
 | Shashwat Gupta | Docking system, launcher mechanism | Precise docking alignment, reliable mechanical launcher |
 | Daniel Yow | Integration, CAD (launcher assembly, mounts) | Manufacturable parts, clean mechanical-electrical interfaces |
 | Mission Organisers | Field layout, scoring criteria, rail operation | Compliance with mission brief, fair assessment conditions |
@@ -264,7 +264,7 @@ The system is decomposed into the following major subsystems:
 
 - **Ball Feed Subsystem:** A 7-ball gravity-fed tube sits above the barrel. Balls (40 mm diameter, ~2.7 g) drop into the barrel bore one at a time under gravity as each shot clears the chamber. Capacity of 7 balls provides 3 per station plus 1 spare.
 
-- **Control Subsystem:** The Raspberry Pi 4B serves as the sole controller, running ROS 2 Humble. The consolidated `delivery_server` node drives the MG90 servo directly via GPIO pin 12 at 50 Hz PWM — no separate shooter node. For Station A, the delivery server executes a timed sequence (fire → 4 s wait → fire → 6 s wait → fire). For Station B, it subscribes to `/detections` (AprilTagDetectionArray), and upon detecting tag ID 3 within the pixel crosshair window, fires reactively with a 4-second cooldown between shots. The RPi Camera V2 feeds `/camera/image_raw` to the external `apriltag_ros` package (not a team-written node), which performs real-time tag36h11 detection and publishes 6-DOF pose as TF frames plus an `apriltag_msgs/AprilTagDetectionArray` on `/detections`.
+- **Control Subsystem:** The Raspberry Pi 4B serves as the sole controller, running ROS 2 Humble. The consolidated `delivery_server` node drives the MG90 servo directly via GPIO pin 12 at 50 Hz PWM — no separate shooter node. For Station A, the delivery server executes a timed sequence (fire → 4 s wait → fire → 6 s wait → fire). For Station B, it subscribes to `/detections` (AprilTagDetectionArray), and upon detecting tag ID 3 within the pixel crosshair window, fires reactively with a 4-second cooldown between shots. The RPi Camera V2 feeds the team's `apriltag_docking` package, a composable vision container (camera → resize → rectify → `apriltag_ros::AprilTagNode`) that performs real-time tag36h11 detection and publishes 6-DOF pose as TF frames plus an `apriltag_msgs/AprilTagDetectionArray` on `/detections`.
 
 - **Structural Platform:** The TurtleBot3 Burger (235 × 230 × 24.5 mm) serves as the base platform. 3D-printed mounts and guides secure the launcher assembly to the TurtleBot3's top plate. The total system height including the launcher and magazine is approximately 300 mm. Daniel's CAD assembly ensures all mechanical interfaces are dimensionally consistent and printable.
 
@@ -299,7 +299,7 @@ The mission coordinator sends `START_DELIVERY` with target `tag36h11:0` to the d
 
 #### 6.3.2 Nominal Operation — Station B (Moving Target)
 
-The mission coordinator sends `START_DELIVERY` with target `tag36h11:2` to the delivery server. The delivery server activates dynamic delivery mode and subscribes to `/detections` from the external `apriltag_ros` node. The RPi Camera V2 continuously captures frames, which the detector processes for tag36h11 markers. When AprilTag ID 3 (mounted on the moving rail carriage) enters the camera's field of view and its center pixel falls within ±50 px of the crosshair (x = 320), the delivery server fires directly via GPIO and enters a 4-second cooldown period. During cooldown, further detections are ignored. After cooldown expires, the system is ready for the next reactive shot. This repeats for up to 3 shots. Upon firing 3 balls or upon mission coordinator timeout, `DELIVERY_COMPLETE` is published.
+The mission coordinator sends `START_DELIVERY` with target `tag36h11:2` to the delivery server. The delivery server activates dynamic delivery mode and subscribes to `/detections` from the `apriltag_docking` vision container. The RPi Camera V2 continuously captures frames, which the detector processes for tag36h11 markers. When AprilTag ID 3 (mounted on the moving rail carriage) enters the camera's field of view and its center pixel falls within ±50 px of the crosshair (x = 320), the delivery server fires directly via GPIO and enters a 4-second cooldown period. During cooldown, further detections are ignored. After cooldown expires, the system is ready for the next reactive shot. This repeats for up to 3 shots. Upon firing 3 balls or upon mission coordinator timeout, `DELIVERY_COMPLETE` is published.
 
 #### 6.3.3 Off-Nominal / Failure Scenarios
 
@@ -319,7 +319,7 @@ Prior to PDR, the team validated the preliminary design against the system requi
 - **CAD interference and tolerance stack-up analysis** vs. SYS-004 and SYS-005: Daniel's CAD assembly verified all parts fit within the 235 × 230 × 300 mm envelope with no interferences.
 - **Prototype barrel/plunger fit check** via test prints: Initial prints confirmed binding risk (R1). After applying 0.3 mm tolerance compensation and sanding barrel interiors, smooth sliding fit was achieved.
 - **Functional firing test:** Measured launch cycle time of 0.87 seconds per ball (SYS-006) and exit velocity in the 1–2 m/s range (SYS-002) using high-speed video analysis.
-- **AprilTag detection validation:** Confirmed reliable detection of tag36h11 ID 3 at Station B operating distances using the RPi Camera V2 and the external `apriltag_ros` package's built-in pose estimation.
+- **AprilTag detection validation:** Confirmed reliable detection of tag36h11 ID 3 at Station B operating distances using the RPi Camera V2 and the `apriltag_docking` composable vision pipeline (resize → rectify → `apriltag_ros::AprilTagNode`).
 
 ---
 
@@ -356,6 +356,6 @@ The system integrates a rack-and-pinion servo-driven spring release, a 7-ball gr
 |---|---|
 | Jeon Won Je | Systems integration, delivery server node, CAD assembly review |
 | Kumaresan | Navigation stack, frontier exploration, mission coordinator |
-| Clara Ong | Perception integration (external `apriltag_ros` package), launcher hardware |
+| Clara Ong | Perception integration (`apriltag_docking` package), launcher hardware |
 | Shashwat Gupta | Docking server, launcher mechanical assembly and tuning |
 | Daniel Yow | CAD finalisation (launcher assembly, TurtleBot3 mounts), 3D printing |

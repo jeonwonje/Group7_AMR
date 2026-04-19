@@ -1,0 +1,32 @@
+@startuml 01-hld-architectural-overview
+!include _style.iuml
+
+title <b>Architectural Overview</b>\n<size:18><color:#5D6D7E>Two-machine ROS 2 Humble · CycloneDDS unicast over Wi-Fi</color></size>
+
+left to right direction
+
+node "<$linux>  Laptop" as Laptop {
+  component "Cartographer SLAM"     as Cart
+  component "Nav2 stack"            as Nav2
+  component "auto_explore_v2"       as Explore
+  component "mission_coordinator"   as Coord  <<coord>>
+  component "docking_server"        as Dock   <<coord>>
+  component "search_stations"       as Search <<search>>
+  component "RViz2"                 as RViz   <<io>>
+
+  Cart    --> Nav2
+  Nav2    --> Explore
+  Explore --> Coord
+  Coord   ..> Dock   : <size:14>/mission_command</size>
+  Coord   ..> Search : <size:14>/mission_command</size>
+}
+
+node "<$raspberrypi>  Raspberry Pi 4B" as RPi {
+  component "turtlebot3_bringup"    as Bring
+  component "apriltag_docking"      as Atag
+  component "delivery_server"       as Deliver <<delivery>>
+}
+
+Laptop -right[#2E86C1,thickness=2]-> RPi : <b>CycloneDDS</b>\n<size:14>Wi-Fi unicast</size>
+
+@enduml

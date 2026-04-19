@@ -27,8 +27,8 @@ that all interfaces are correctly wired.
 | # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile          | Machine |
 |---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
 | 1 | `/scan`                  | `sensor_msgs/LaserScan`              | LDS-02 driver          | Cartographer, Nav2 costmap           | Best-effort, volatile | RPi     |
-| 2 | `/camera/image_raw`      | `sensor_msgs/Image`                  | v4l2_camera            | apriltag_ros                         | Best-effort, volatile | RPi     |
-| 3 | `/camera/camera_info`    | `sensor_msgs/CameraInfo`            | v4l2_camera            | apriltag_ros                         | Best-effort, volatile | RPi     |
+| 2 | `/camera/image_raw`      | `sensor_msgs/Image`                  | `camera_ros::CameraNode` (1640×1232 BGR888 @ 10 Hz, inside `apriltag_vision_container`) | `image_proc::ResizeNode` (same container)          | Best-effort, volatile | RPi     |
+| 3 | `/camera/camera_info`    | `sensor_msgs/CameraInfo`             | `camera_ros::CameraNode` | `image_proc::ResizeNode`             | Best-effort, volatile | RPi     |
 | 4 | `/imu`                   | `sensor_msgs/Imu`                   | OpenCR                 | Cartographer                         | Best-effort, volatile | RPi     |
 | 5 | `/odom`                  | `nav_msgs/Odometry`                 | OpenCR (diff-drive)    | Cartographer, Nav2                   | Best-effort, volatile | RPi     |
 
@@ -40,27 +40,32 @@ that all interfaces are correctly wired.
 | 7 | `/goal_pose`             | `geometry_msgs/PoseStamped`          | score_and_post         | Nav2 bt_navigator                    | Reliable, volatile    | Laptop  |
 | 8 | `/cmd_vel`               | `geometry_msgs/Twist`                | Nav2 controller / docking_server / search_stations | OpenCR | Reliable, volatile | Both    |
 
-### 2.3  Perception Topics
+### 2.3  Perception Topics (all originate inside `apriltag_vision_container` on RPi)
 
-| # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile          | Machine |
-|---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
-| 9 | `/detections`            | `apriltag_msgs/AprilTagDetectionArray` | apriltag_ros (RPi)   | delivery_server                      | Best-effort, volatile | RPi     |
-| 10| `/tf`                    | `tf2_msgs/TFMessage` (`camera_link → tag36h11:<id>`) | apriltag_ros | mission_coordinator, docking_server | Reliable, volatile | RPi     |
+| # | Topic                           | Message Type                          | Publisher                                          | Subscriber(s)                        | QoS Profile           | Machine |
+|---|---------------------------------|---------------------------------------|----------------------------------------------------|--------------------------------------|-----------------------|---------|
+| 9 | `/camera/resized/image_raw`     | `sensor_msgs/Image`                   | `image_proc::ResizeNode`                           | `image_proc::RectifyNode`            | Best-effort, volatile | RPi     |
+| 10| `/camera/resized/camera_info`   | `sensor_msgs/CameraInfo`              | `image_proc::ResizeNode`                           | `image_proc::RectifyNode`, `apriltag_ros::AprilTagNode` | Best-effort, volatile | RPi     |
+| 11| `/camera/resized/image_rect`    | `sensor_msgs/Image`                   | `image_proc::RectifyNode`                          | `apriltag_ros::AprilTagNode`         | Best-effort, volatile | RPi     |
+| 12| `/detections`                   | `apriltag_msgs/AprilTagDetectionArray`| `apriltag_ros::AprilTagNode`                       | delivery_server, mission_coordinator | Best-effort, volatile | RPi     |
+| 13| `/detected_dock_pose_0`         | `geometry_msgs/PoseStamped` (frame_id = `camera`) | `apriltag_docking::detected_dock_pose_publisher_0` (10 Hz) | docker                | Reliable, volatile    | RPi     |
+| 14| `/detected_dock_pose_2`         | `geometry_msgs/PoseStamped` (frame_id = `camera`) | `apriltag_docking::detected_dock_pose_publisher_2` (10 Hz) | docker                | Reliable, volatile    | RPi     |
+| 15| `/tf`                           | `tf2_msgs/TFMessage` (`camera → tag36h11:{0,2}`) | `apriltag_ros::AprilTagNode` (dynamic); four static broadcasters (`base_link→camera_link`, `camera_link→camera`, `tag36h11:0→nav2_dock_target_0`, `tag36h11:2→nav2_dock_target_2`) | mission_coordinator, docker | Reliable, volatile    | RPi     |
 
 ### 2.4  Mission Coordination Topics
 
 | # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile          | Machine |
 |---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
-| 11| `/mission_command`       | `std_msgs/String` (JSON)             | mission_coordinator    | docker, delivery_server, search_stations | Reliable, volatile | Laptop  |
-| 12| `/mission_status`        | `std_msgs/String` (JSON)             | docker (`sender: docker`), delivery_server (`sender: deliverer`), search_stations (`sender: searcher`), score_and_post | mission_coordinator | Reliable, volatile | Both |
+| 16| `/mission_command`       | `std_msgs/String` (JSON)             | mission_coordinator    | docker, delivery_server, search_stations | Reliable, volatile | Laptop  |
+| 17| `/mission_status`        | `std_msgs/String` (JSON)             | docker (`sender: docker`), delivery_server (`sender: deliverer`), search_stations (`sender: searcher`) | mission_coordinator | Reliable, volatile | Both |
 
 ### 2.5  Exploration-Internal Topics
 
 | # | Topic                    | Message Type                          | Publisher              | Subscriber(s)                        | QoS Profile          | Machine |
 |---|--------------------------|---------------------------------------|------------------------|--------------------------------------|-----------------------|---------|
-| 13| `frontiers`              | `std_msgs/String` (JSON)             | find_frontiers         | score_and_post                       | Reliable, volatile   | Laptop  |
-| 14| `bfs_distance_transform` | `std_msgs/String` (JSON)             | find_frontiers         | score_and_post                       | Reliable, volatile   | Laptop  |
-| 15| `/nav_status`            | `std_msgs/String`                    | score_and_post         | find_frontiers                       | Best-effort, volatile | Laptop  |
+| 18| `frontiers`              | `std_msgs/String` (JSON)             | find_frontiers         | score_and_post                       | Reliable, volatile   | Laptop  |
+| 19| `bfs_distance_transform` | `std_msgs/String` (JSON)             | find_frontiers         | score_and_post                       | Reliable, volatile   | Laptop  |
+| 20| `/nav_status`            | `std_msgs/String`                    | score_and_post         | find_frontiers                       | Best-effort, volatile | Laptop  |
 
 ---
 
@@ -102,13 +107,14 @@ All commands are JSON-encoded `std_msgs/String` messages on `/mission_command`.
 
 | Sender            | Status                 | Data                | Meaning                                |
 |-------------------|------------------------|---------------------|----------------------------------------|
-| `score_and_post`  | `EXPLORATION_COMPLETE` | —                   | All frontiers visited                  |
 | `docker`          | `DOCKING_COMPLETE`     | `tag36h11:<id>`     | Robot docked at tag                    |
 | `docker`          | `DOCKING_FAILED`       | `tag36h11:<id>`     | Docking aborted (timeout/geometry)     |
 | `docker`          | `UNDOCKING_COMPLETE`   | —                   | Robot cleared from tag                 |
 | `deliverer`       | `BALL_FIRED`           | shot detail         | Single ball confirmed fired            |
 | `deliverer`       | `DELIVERY_COMPLETE`    | `tag36h11:<id>`     | All balls delivered at station         |
 | `searcher`        | `SEARCH_FAILED`        | —                   | All search zones exhausted, no tag     |
+
+**Note:** `EXPLORATION_COMPLETE` is defined in the contract but is **not currently emitted** by any node. The mission coordinator reaches SEARCHING via its `initial_exploration_timeout` instead (see Subsystem Design §2.5 "Known gap").
 
 ---
 
@@ -164,32 +170,21 @@ shooter node or `/fire_ball` service.
 
 ## 6  TF Tree
 
-```
-              map
-               │
-               ├── odom
-               │    │
-               │    └── base_footprint
-               │         │
-               │         └── base_link
-               │              │
-               │              ├── base_scan (LiDAR)
-               │              │
-               │              └── camera_link
-               │                   │
-               │                   ├── tag36h11:0  (dynamic, from apriltag_ros)
-               │                   ├── tag36h11:2  (dynamic, from apriltag_ros)
-               │                   └── tag36h11:3  (dynamic, if visible)
-               │
-               └── (Cartographer submap frames)
-```
+![Figure 7 — TF Tree](../diagrams/out/07-icd-tf-tree.png)
+
+*Figure 7 — Live TF tree from `ros2 run tf2_tools view_frames`. Source: [`../diagrams/07-icd-tf-tree.puml`](../diagrams/07-icd-tf-tree.puml).*
+
+**Note:** tag36h11 ID 3 is consumed from `/detections` by the delivery server for
+Station B reactive fires and is **not** broadcast as a TF frame.
 
 **Publishers:**
 - `map → odom`: Cartographer (SLAM correction).
 - `odom → base_footprint → base_link`: OpenCR odometry.
-- `base_link → base_scan`: static transform (URDF).
-- `base_link → camera_link`: static transform (launch file).
-- `camera_link → tag36h11:<id>`: `apriltag_ros` (dynamic, per-frame).
+- `base_link → base_scan`: LiDAR driver (TurtleBot3 bringup).
+- `base_link → camera_link`: static transform publisher (apriltag_docking launch, x=0.09 y=0.05 z=0.097).
+- `camera_link → camera`: static transform publisher (optical-frame rotation, yaw=-π/2 roll=-π/2).
+- `camera → tag36h11:{0,2}`: `apriltag_ros::AprilTagNode` (dynamic, per-frame).
+- `tag36h11:{0,2} → nav2_dock_target_{0,2}`: static transform publishers (apriltag_docking launch, x=0.195 z=0.05 pitch=-π/2 roll=π/2).
 
 **Stale TF policy:** The mission coordinator considers a tag transform stale if
 its timestamp is older than 0.5 s relative to `now()`. Stale transforms are
@@ -204,7 +199,7 @@ ignored to prevent acting on "ghost" detections.
 | Pin     | Function              | Connected To               | Protocol     |
 |---------|-----------------------|----------------------------|--------------|
 | GPIO 12 | PWM output            | MG90 servo (launcher)       | Hardware PWM |
-| GND     | Common ground         | Servo, motor, buck converter| —            |
+| GND     | Common ground         | Servo, motor, OpenCR 5 V regulator | —            |
 
 ### 7.2  Serial / USB
 
