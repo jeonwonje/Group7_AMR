@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>apriltag_docking</name>
+  <version>0.0.0</version>
+  <description>Custom AprilTag detection pipeline for the CDE2310 Group 7 AMR. Wraps camera_ros, image_proc (resize + rectify), and apriltag_ros in a zero-copy composable container; publishes per-station dock-target TF frames and PoseStamped topics consumed by the Nav2 docker.</description>
+  <maintainer email="shashwatgupta958@gmail.com">Shashwat Gupta</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+  <depend>rclcpp</depend>
+  <depend>rclpy</depend>
+  <depend>apriltag_ros</depend>
+  <depend>apriltag_msgs</depend>
+  <depend>image_proc</depend>
+  <depend>image_view</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav2_simple_commander</depend>
+  <depend>tf2_ros</depend>
+</package>
