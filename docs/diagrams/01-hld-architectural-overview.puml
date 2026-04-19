@@ -1,5 +1,4 @@
 @startuml 01-hld-architectural-overview
-!pragma layout smetana
 !include _style.iuml
 
 title <b><size:24>Architectural Overview</size></b>\n<size:16>Two-machine ROS 2 Humble workspace, CycloneDDS unicast over Wi-Fi</size>
