@@ -37,8 +37,9 @@ and actuation run on the Raspberry Pi mounted to the robot.
 │  │  └────────────┬────────────┘        │  │  └───────────────────────┘  │  │
 │  │               │                     │  │                             │  │
 │  │  ┌────────────▼────────────┐        │  │  ┌───────────────────────┐  │  │
-│  │  │   Nav2 stack            │        │  │  │  apriltag_ros (ext.)  │  │  │
-│  │  │   (planner, controller) │        │  │  │  /camera → TF,/detect.│  │  │
+│  │  │   Nav2 stack            │        │  │  │  apriltag_docking     │  │  │
+│  │  │   (planner, controller) │        │  │  │  (vision container +  │  │  │
+│  │  │                         │        │  │  │   dock-pose pubs)     │  │  │
 │  │  └────────────┬────────────┘        │  │  └───────────────────────┘  │  │
 │  │               │                     │  │                             │  │
 │  │  ┌────────────▼────────────┐        │  │  ┌───────────────────────┐  │  │
@@ -107,13 +108,15 @@ src/
  LDS-02 LiDAR         RPi Camera V2
       │                     │
       ▼                     ▼
- /scan topic          /camera/image_raw
+ /scan topic          /camera/image_raw (1640×1232)
       │                     │
       ▼                     ▼
- Cartographer         apriltag_ros (ext.)
-      │                     │
-      ├──► /map             ├──► TF: camera_link → tag36h11:<id>
-      │                     │
+ Cartographer         apriltag_docking container
+      │                     │  (resize → rectify → apriltag_ros)
+      ├──► /map             ├──► TF: camera → tag36h11:{0,2}
+      │                     ├──► /detections (AprilTagDetectionArray)
+      │                     ├──► /detected_dock_pose_0 (PoseStamped)
+      │                     └──► /detected_dock_pose_2 (PoseStamped)
       ▼                     ▼
  find_frontiers       mission_coordinator (TF poll)
       │                     │
@@ -156,11 +159,12 @@ All coordination flows through two JSON-encoded String topics:
 | `/map`               | OccupancyGrid        | Cartographer           | find_frontiers, search_stations |
 | `/scan`              | LaserScan            | LDS-02 driver          | Cartographer, Nav2              |
 | `/cmd_vel`           | Twist                | Nav2, docker          | OpenCR (motor driver)           |
-| `/camera/image_raw`  | Image                | RPi camera driver      | apriltag_ros (external)         |
+| `/camera/image_raw`  | Image                | `camera_ros::CameraNode` (RPi)  | `image_proc::ResizeNode` (inside apriltag_docking container) |
 | `/mission_command`   | String (JSON)        | mission_coordinator    | docker, delivery_server, searcher |
 | `/mission_status`    | String (JSON)        | docker, deliverer, searcher, score_and_post | mission_coordinator |
 | `/goal_pose`         | PoseStamped          | score_and_post         | Nav2 planner                    |
-| `/detections`        | AprilTagDetectionArray | apriltag_ros (RPi)   | delivery_server                 |
+| `/detections`        | AprilTagDetectionArray | `apriltag_ros::AprilTagNode` (inside apriltag_docking container, RPi) | delivery_server, mission_coordinator |
+| `/detected_dock_pose_{0,2}` | PoseStamped    | `apriltag_docking::detected_dock_pose_publisher_{0,2}` (RPi) | docker |
 | `frontiers`          | String (JSON)        | find_frontiers         | score_and_post                  |
 
 ### 5.2  ROS 2 Services
@@ -201,7 +205,7 @@ All coordination flows through two JSON-encoded String topics:
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  ┌── Layer 1 (Base) ─────────────────────────────────────────────────┐  │
-│  │  LiPo battery 11.1 V ──► Buck converter 5 V ──► RPi                │  │
+│  │  LiPo battery 11.1 V ──► OpenCR ──► 5 V regulated ──► RPi          │  │
 │  │  Dynamixel motors, caster wheel                                   │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
@@ -220,7 +224,7 @@ All coordination flows through two JSON-encoded String topics:
 | Middleware    | ROS 2 Humble + CycloneDDS (FastRTPS for Gazebo/WSL2) |
 | SLAM          | Cartographer (google_cartographer_ros)        |
 | Navigation    | Nav2 (planner, controller, behaviours, BT)    |
-| Perception    | External `apriltag_ros` ROS 2 package         |
+| Perception    | `apriltag_docking` composable container (wraps upstream `apriltag_ros`, `image_proc`, `camera_ros`) |
 | Build system  | colcon + ament_python                         |
 | Language      | Python 3.10                                   |
 | Version ctrl  | Git + GitHub                                  |
@@ -237,7 +241,7 @@ All coordination flows through two JSON-encoded String topics:
 | DD-03 | Discrete geometric docking instead of PID            | Eliminates gain-tuning; state machine is more debuggable.   |
 | DD-04 | BFS frontier detection (not RRT or information-gain) | Simpler to implement and debug; sufficient for maze.        |
 | DD-05 | Tag blacklisting on dock failure                     | Prevents infinite retry loops on bad-angle detections.      |
-| DD-06 | External `apriltag_ros` over a team-written detector  | Avoids reinventing calibrated pose estimation; TF integration is free. |
+| DD-06 | `apriltag_docking` composable pipeline (wrapping upstream `apriltag_ros`) over a team-written Python detector | Zero-copy camera→detect path on the RPi; per-station `nav2_dock_target_{id}` frames + `detected_dock_pose_publisher` give Nav2-consumable PoseStamped without reinventing pose estimation. |
 
 ---
 
