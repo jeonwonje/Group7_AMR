@@ -1,8 +1,15 @@
-# End User Documentation — Group 7 (MeowthBot)
+# End User Documentation
 
-*CDE2310 AY25/26 · NUS College of Design and Engineering · Group 7*
-*Document v2.0 — 2026-04-19 · 5 pages max — for Final Mission submission*
-*This document must remain with the robot at all times.*
+## MeowthBot AMR
+
+*Group 7 Engineering Company Pte Ltd*
+
+<p align="center">
+  <img src="images/robot_side.jpg"  alt="Robot assembly — side view"  width="45%" />
+  <img src="images/robot_front.jpg" alt="Robot assembly — front view" width="45%" />
+</p>
+
+*Figure 1: Robot assembly — side view (left) and front view (right).*
 
 ---
 
@@ -46,6 +53,10 @@ laptop over Wi-Fi (CycloneDDS).
 3. **Dock** — Stage at **0.40 m** via Nav2, then run COMPUTE_GEOMETRY → INTERCEPT → SQUARE_UP → EVALUATE_POSITION → (RETRY_BACKUP) → FINAL_PLUNGE to **0.10 m**.
 4. **Deliver** — Coordinator publishes `{"action":"START_DELIVERY","target":"tag36h11:<N>"}` on `/mission_command`. Station A: 3 timed shots (4 s, 6 s gaps). Station B: reactive — fires when `tag36h11:3` crosses pixel x = 320 ± 50 px; 4 s cooldown; 3 shots max.
 5. **Resume** — Undock, clear blacklist, resume exploration. If exploration has timed out (default 480 s) and tags remain, enter SEARCH over pre-computed offsets.
+
+![Figure 2: Mission flow activity diagram.](images/mission_flow_diagram.svg)
+
+*Figure 2: Mission flow — system block flow diagram.*
 
 ### 1.3 Safety call-outs
 
@@ -183,4 +194,9 @@ v1.0.0 → v2.2.0) is in `hardware/README.md` — do not duplicate here.
 
 ---
 
-*Robot Serial: Group 7, CDE2310 AY25/26, NUS EDIC*
+*Group 7 Engineering Company Pte Ltd*
+*Document Version 2.1 — 2026-04-19 · 5 pages max — for Final Mission submission.*
+*This document must remain with the robot at all times.*
+*Robot Serial: Group 7, CDE2310 AY25/26, NUS EDIC.*
+
+*v2.1 supersedes the printed v2.0 (2026-04-16): perception package corrected to `apriltag_docking`, drive actuator to XL430-W210, docking staging distance to 0.40 m, docking FSM expanded to the 8-state `docker.py` machine, launcher FAT updated to publish on `/mission_command` (the non-existent `/fire_ball` service was removed from §4), exploration-timeout default corrected to 480 s. Regenerate the printed PDF from this file before submission.*
