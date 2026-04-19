@@ -234,7 +234,7 @@ out of the barrel via a gravity-fed tube (7-ball capacity).
 
 ### 2.5  Mission Coordination — `mission_coordinator_v3`
 
-**Owner:** Shashwat (current). Historical authorship: Kuga (v1–v3), Jeon (robustness patches).
+**Owner:** Shashwat. Jeon (robustness patches).
 
 **Purpose:** Central FSM that orchestrates all subsystems and manages the
 mission lifecycle.
@@ -272,7 +272,7 @@ against the timeout behaviour in the requirements document to reflect this.
 
 ### 2.6  Search Subsystem — `search_stations`
 
-**Owner:** Kuga (navigation core)
+**Owner:** Shashwat
 
 **Purpose:** When exploration is complete but tags remain un-serviced, navigate
 to pre-computed zones and spin to scan for the missing tag.
